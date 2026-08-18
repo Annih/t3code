@@ -2127,6 +2127,20 @@ export function GeneralSettingsPanel() {
           }
         />
 
+        <SettingsRow
+          {...searchableSetting("group-threads-by-project")}
+          description="Group active sidebar threads under collapsible project headers, ordered by last activity."
+          control={
+            <Switch
+              checked={settings.sidebarGroupThreadsByProject}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarGroupThreadsByProject: Boolean(checked) })
+              }
+              aria-label="Group threads by project"
+            />
+          }
+        />
+
         {supportsAutoSettlement ? (
           <>
             <SettingsRow

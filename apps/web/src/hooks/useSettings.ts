@@ -338,6 +338,18 @@ export function useLegacySidebarEnabled(): boolean {
   return settingsHydrated && legacySidebarEnabled;
 }
 
+/**
+ * Whether the sidebar groups its active threads under per-project headers.
+ * Gated on hydration for the same reason as useLegacySidebarEnabled: grouped
+ * mode restructures the whole thread list, and resolving against the
+ * pre-hydration defaults would mount the flat list and then regroup it.
+ */
+export function useSidebarGroupThreadsByProject(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  const groupThreadsByProject = useClientSettingsValue().sidebarGroupThreadsByProject;
+  return settingsHydrated && groupThreadsByProject;
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,
