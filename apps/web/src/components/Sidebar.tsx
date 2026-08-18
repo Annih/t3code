@@ -98,15 +98,20 @@ import { readLocalApi } from "../localApi";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import {
   buildSidebarProjectSnapshots,
+  projectExpansionPreferenceKeys,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import {
+  legacyProjectCwdPreferenceKey,
+  resolveProjectExpanded,
+  useUiStateStore,
+} from "../uiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useSidebarGroupThreadsByProject } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -135,6 +140,7 @@ import {
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
+  groupActiveThreadsByProject,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -2179,6 +2185,10 @@ export default function Sidebar() {
       setProjectScopeKey(null);
     }
   }, [projectScopeKey, scopedProjectGroup]);
+  // Grouped mode only applies to the unscoped list: scoped to one project,
+  // a per-project header over every row would restate the scope picker.
+  const groupThreadsByProject = useSidebarGroupThreadsByProject();
+  const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2432,9 +2442,61 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // Grouped mode reshapes only the active partition: sections in project
+  // order (already activity-sorted), threads by last activity within each.
+  // Expansion prefs live in uiStateStore under the same alias keys the
+  // legacy sidebar writes, so a project's expand/collapse intent carries
+  // across sidebar modes. Per-section visibleThreads is the single source
+  // of truth for both the DOM and orderedThreads below — a collapsed
+  // group's threads leave jump hints and multi-select exactly like a
+  // collapsed shelf's, except the routed thread, which never hides.
+  const projectExpandedById = useUiStateStore((state) => state.projectExpandedById);
+  const setProjectExpanded = useUiStateStore((state) => state.setProjectExpanded);
+  const groupedActiveSections = useMemo(() => {
+    if (!groupedModeActive) return null;
+    const { sections, ungrouped } = groupActiveThreadsByProject(projectGroups, activeThreads);
+    return {
+      sections: sections.map((section) => {
+        const expanded = resolveProjectExpanded(
+          projectExpandedById,
+          projectExpansionPreferenceKeys(section.project),
+        );
+        const visibleThreads = expanded
+          ? section.threads
+          : section.threads.filter(
+              (thread) =>
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+            );
+        return { ...section, expanded, visibleThreads };
+      }),
+      ungrouped,
+    };
+  }, [activeThreads, groupedModeActive, projectExpandedById, projectGroups, routeThreadKey]);
+  const toggleProjectGroupExpanded = useCallback(
+    (project: SidebarProjectSnapshot, expanded: boolean) => {
+      setProjectExpanded(projectExpansionPreferenceKeys(project), !expanded);
+    },
+    [setProjectExpanded],
+  );
+  const visibleActiveThreads = useMemo(
+    () =>
+      groupedActiveSections === null
+        ? activeThreads
+        : [
+            ...groupedActiveSections.sections.flatMap((section) => section.visibleThreads),
+            ...groupedActiveSections.ungrouped,
+          ],
+    [activeThreads, groupedActiveSections],
+  );
+
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...pinnedThreads,
+      ...visibleActiveThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [pinnedThreads, visibleActiveThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3948,8 +4010,12 @@ export default function Sidebar() {
                     // row: every other thread is a full card. Density comes
                     // from users (or the auto rules) actually parking work,
                     // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
-                    const rowVariant = isCard ? "card" : "slim";
+                    // Exception: grouped mode, where the user opted the whole
+                    // active partition into compact per-project rows.
+                    const isCard =
+                      section === "pinned" ||
+                      (section === "active" && groupedActiveSections === null);
+                    const rowVariant = isCard ? "card" : section === "active" ? "grouped" : "slim";
                     return (
                       <SidebarThreadRow
                         // Keyed per variant on purpose: when a thread settles,
@@ -4120,8 +4186,64 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                  if (groupedActiveSections !== null) {
+                    // Grouped mode: a collapsible header per project (same
+                    // anatomy as the shelf headers below), compact rows under
+                    // it. Sections and rows share the shelves' conditional-
+                    // render collapse — no animated-height panel, which would
+                    // fight content-visibility and the list's auto-animate.
+                    for (const section of groupedActiveSections.sections) {
+                      items.push(
+                        <li
+                          key={`project-group-header:${section.project.projectKey}`}
+                          data-thread-selection-safe
+                          className="list-none"
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleProjectGroupExpanded(section.project, section.expanded)
+                            }
+                            aria-expanded={section.expanded}
+                            data-testid="sidebar-project-group-toggle"
+                            className="mb-1 mt-2 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                          >
+                            <ProjectFavicon
+                              environmentId={section.project.environmentId}
+                              cwd={section.project.workspaceRoot}
+                              faviconPath={section.project.faviconPath}
+                              className="size-4 shrink-0"
+                            />
+                            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                              {section.expanded
+                                ? section.project.displayName
+                                : `${section.project.displayName} (${section.threads.length})`}
+                            </span>
+                            <span className="h-px flex-1 bg-sidebar-border/60" />
+                            <ChevronDownIcon
+                              aria-hidden
+                              className={cn(
+                                "size-3 shrink-0 text-muted-foreground/50 transition-transform",
+                                section.expanded && "rotate-180",
+                              )}
+                            />
+                          </button>
+                        </li>,
+                      );
+                      for (const thread of section.visibleThreads) {
+                        items.push(renderThreadRow(thread, "active"));
+                      }
+                    }
+                    // Threads whose project matches no group (stale refs
+                    // mid-sync): rendered headerless at the tail rather than
+                    // silently dropped.
+                    for (const thread of groupedActiveSections.ungrouped) {
+                      items.push(renderThreadRow(thread, "active"));
+                    }
+                  } else {
+                    for (const thread of activeThreads) {
+                      items.push(renderThreadRow(thread, "active"));
+                    }
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything
