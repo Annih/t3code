@@ -734,7 +734,10 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  // "grouped" is the slim layout for project-grouped active rows: the
+  // project favicon (redundant under a project header) yields its slot to
+  // the provider icon.
+  variant: "card" | "slim" | "grouped";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1207,7 +1210,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        variant === "card"
+        // Grouped rows are active threads in slim clothing: they keep the
+        // card's title emphasis (unread/woke pop, recede only when quiet)
+        // instead of the settled tail's uniformly receded palette.
+        variant !== "slim"
           ? cn(
               "truncate",
               isUnread || isWoke
@@ -1313,7 +1319,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
-  if (variant === "slim") {
+  if (variant === "slim" || variant === "grouped") {
     return (
       <li
         data-thread-item
@@ -1327,6 +1333,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
+                data-variant={variant}
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
@@ -1345,14 +1352,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
               )}
             >
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                projectName={props.projectTitle ?? ""}
-                faviconPath={props.projectFaviconPath}
-                projectIcon={props.projectIcon}
-                className="size-4"
-              />
+              {variant === "grouped" && driverKind ? (
+                <ProviderInstanceIcon
+                  driverKind={driverKind}
+                  displayName={thread.session?.providerName ?? modelInstanceId}
+                  iconClassName="size-4"
+                />
+              ) : (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  projectName={props.projectTitle ?? ""}
+                  faviconPath={props.projectFaviconPath}
+                  projectIcon={props.projectIcon}
+                  className="size-4"
+                  fallbackIcon={MessageSquareIcon}
+                />
+              )}
             </span>
             {draftIndicator}
             {title}
