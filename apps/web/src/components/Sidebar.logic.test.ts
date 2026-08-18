@@ -25,6 +25,8 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
+  filterSidebarProjectGroups,
+  groupActiveThreadsByProject,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
@@ -1748,5 +1750,86 @@ describe("sortLogicalProjectsForSidebar", () => {
         (project) => project.projectKey,
       ),
     ).toEqual(["logical-newer", "logical-older"]);
+  });
+});
+
+describe("groupActiveThreadsByProject", () => {
+  const alphaProjectId = ProjectId.make("project-alpha");
+  const betaProjectId = ProjectId.make("project-beta");
+  const quietProjectId = ProjectId.make("project-quiet");
+  const makeGroup = (projectKey: string, projectId: ProjectId) => ({
+    ...makeProject({ id: projectId, title: projectKey }),
+    projectKey,
+    memberProjectRefs: [{ environmentId: localEnvironmentId, projectId }],
+  });
+  const projects = [
+    makeGroup("logical-alpha", alphaProjectId),
+    makeGroup("logical-beta", betaProjectId),
+    makeGroup("logical-quiet", quietProjectId),
+  ];
+
+  it("sections follow project order and omit projects with no active thread", () => {
+    const { sections, ungrouped } = groupActiveThreadsByProject(projects, [
+      makeThread({ id: ThreadId.make("thread-beta"), projectId: betaProjectId }),
+      makeThread({ id: ThreadId.make("thread-alpha"), projectId: alphaProjectId }),
+    ]);
+
+    expect(sections.map((section) => section.project.projectKey)).toEqual([
+      "logical-alpha",
+      "logical-beta",
+    ]);
+    expect(ungrouped).toEqual([]);
+  });
+
+  it("orders threads within a section by last activity, not creation time", () => {
+    const olderButActive = makeThread({
+      id: ThreadId.make("thread-older-created"),
+      projectId: alphaProjectId,
+      createdAt: "2026-03-01T10:00:00.000Z",
+      updatedAt: "2026-03-09T12:00:00.000Z",
+    });
+    const newerButIdle = makeThread({
+      id: ThreadId.make("thread-newer-created"),
+      projectId: alphaProjectId,
+      createdAt: "2026-03-08T10:00:00.000Z",
+      updatedAt: "2026-03-08T10:00:00.000Z",
+    });
+
+    const { sections } = groupActiveThreadsByProject(projects, [newerButIdle, olderButActive]);
+
+    expect(sections[0]?.threads.map((thread) => thread.id)).toEqual([
+      "thread-older-created",
+      "thread-newer-created",
+    ]);
+  });
+
+  it("collects threads whose project matches no group into ungrouped", () => {
+    const orphan = makeThread({
+      id: ThreadId.make("thread-orphan"),
+      projectId: ProjectId.make("project-unknown"),
+    });
+
+    const { sections, ungrouped } = groupActiveThreadsByProject(projects, [orphan]);
+
+    expect(sections).toEqual([]);
+    expect(ungrouped.map((thread) => thread.id)).toEqual(["thread-orphan"]);
+  });
+
+  it("breaks last-activity ties stably by id, matching the shared thread sort", () => {
+    const tied = (id: string) =>
+      makeThread({
+        id: ThreadId.make(id),
+        projectId: alphaProjectId,
+        updatedAt: "2026-03-09T10:00:00.000Z",
+      });
+
+    // sortThreads breaks timestamp ties by id descending; input order must
+    // not leak through.
+    const { sections } = groupActiveThreadsByProject(projects, [
+      tied("thread-a"),
+      tied("thread-b"),
+    ]);
+
+    expect(sections[0]?.threads.map((thread) => thread.id)).toEqual(["thread-b", "thread-a"]);
   });
 });

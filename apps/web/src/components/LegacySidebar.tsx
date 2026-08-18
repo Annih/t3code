@@ -209,6 +209,7 @@ import type { SidebarThreadSummary } from "../types";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
+  projectExpansionPreferenceKeys,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
@@ -257,14 +258,6 @@ function formatProjectMemberActionLabel(
   return member.environmentLabel
     ? `${member.environmentLabel} — ${member.workspaceRoot}`
     : member.workspaceRoot;
-}
-
-function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string[] {
-  return [
-    project.projectKey,
-    ...project.memberProjects.map((member) => member.physicalProjectKey),
-    ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
-  ];
 }
 
 function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): string {

@@ -995,6 +995,62 @@ export function sortLogicalProjectsForSidebar<
   );
 }
 
+export interface GroupedActiveThreadSection<TProject, TThread> {
+  project: TProject;
+  /** The project's active threads, last activity first. */
+  threads: TThread[];
+}
+
+/**
+ * Bucket the active partition under its logical project groups for the
+ * grouped sidebar mode. Section order follows the input project order (the
+ * caller passes the activity-sorted group list), so the busiest project
+ * surfaces first; within a section threads sort by last activity — unlike
+ * the flat list's static creation order, grouped rows are compact enough
+ * that reorder-on-activity reads as recency, not churn. Projects with no
+ * active thread produce no section; threads whose project ref matches no
+ * group land in `ungrouped` so nothing silently disappears.
+ */
+export function groupActiveThreadsByProject<
+  TProject extends LogicalSidebarProject,
+  TThread extends ScopedSidebarThread & { readonly id: string },
+>(
+  projects: readonly TProject[],
+  activeThreads: readonly TThread[],
+): { sections: GroupedActiveThreadSection<TProject, TThread>[]; ungrouped: TThread[] } {
+  const groupKeyByProjectRef = new Map(
+    projects.flatMap((project) =>
+      project.memberProjectRefs.map(
+        (projectRef) =>
+          [`${projectRef.environmentId}\0${projectRef.projectId}`, project.projectKey] as const,
+      ),
+    ),
+  );
+  const threadsByProjectKey = new Map<string, TThread[]>();
+  const ungrouped: TThread[] = [];
+  for (const thread of activeThreads) {
+    const projectKey = groupKeyByProjectRef.get(`${thread.environmentId}\0${thread.projectId}`);
+    if (!projectKey) {
+      ungrouped.push(thread);
+      continue;
+    }
+    const existing = threadsByProjectKey.get(projectKey);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      threadsByProjectKey.set(projectKey, [thread]);
+    }
+  }
+
+  return {
+    sections: projects.flatMap((project) => {
+      const threads = threadsByProjectKey.get(project.projectKey);
+      return threads ? [{ project, threads: sortThreads(threads, "updated_at") }] : [];
+    }),
+    ungrouped: sortThreads(ungrouped, "updated_at"),
+  };
+}
+
 /**
  * Sorts the cross-environment project collection used by landing surfaces.
  * Project ids are only unique within an environment, and archived threads

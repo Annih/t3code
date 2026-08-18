@@ -1,6 +1,7 @@
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
 import type { Project } from "./types";
+import { legacyProjectCwdPreferenceKey } from "./uiStateStore";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
 
@@ -29,6 +30,20 @@ export interface SidebarProjectPickerEntry {
   group: SidebarProjectSnapshot;
   targetProject: SidebarProjectGroupMember;
   isPreferred: boolean;
+}
+
+/**
+ * Every uiStateStore key a project group's expand/collapse preference reads
+ * and writes under: the logical group key, each member's physical key, and
+ * each member's legacy cwd alias. Writing all of them keeps the preference
+ * stable across grouping-mode changes and shared between sidebar variants.
+ */
+export function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string[] {
+  return [
+    project.projectKey,
+    ...project.memberProjects.map((member) => member.physicalProjectKey),
+    ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
+  ];
 }
 
 export function buildPhysicalToLogicalProjectKeyMap(input: {
