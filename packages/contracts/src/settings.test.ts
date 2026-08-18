@@ -214,6 +214,31 @@ describe("ClientSettings sidebar", () => {
     expect(decodeClientSettingsPatch({ confirmThreadUnpin: true }).confirmThreadUnpin).toBe(true);
     expect(() => decodeClientSettingsPatch({ confirmThreadUnpin: "yes" })).toThrow();
   });
+
+  it("defaults group-threads-by-project off and preserves an explicit opt-in", () => {
+    expect(decodeClientSettings({}).sidebarGroupThreadsByProject).toBe(false);
+    expect(
+      decodeClientSettings({ sidebarGroupThreadsByProject: true }).sidebarGroupThreadsByProject,
+    ).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ sidebarGroupThreadsByProject: true })
+        .sidebarGroupThreadsByProject,
+    ).toBe(true);
+  });
+
+  it("rejects non-boolean group-threads-by-project values", () => {
+    expect(() => decodeClientSettings({ sidebarGroupThreadsByProject: "yes" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ sidebarGroupThreadsByProject: 1 })).toThrow();
+  });
+
+  it("allows auto-settle by inactivity to be disabled", () => {
+    expect(
+      decodeClientSettings({ sidebarAutoSettleAfterDays: null }).sidebarAutoSettleAfterDays,
+    ).toBeNull();
+    expect(
+      decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: null }).sidebarAutoSettleAfterDays,
+    ).toBeNull();
+  });
 });
 
 describe("ClientSettings context window meter", () => {
