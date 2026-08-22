@@ -95,6 +95,40 @@ jobs:
           name: wsl-node-pty-x64
           path: wsl-prebuild
 
+      # Fork identity stamping, applied at build time so the source branches
+      # stay clean for upstream PRs:
+      # - version gains "-annih.<sha>": the WSL server tree is extracted into a
+      #   per-version directory keyed on this string, so every build gets a
+      #   fresh tree instead of silently reusing one from a same-version
+      #   official install (the stale-UI trap).
+      # - "Alpha" becomes "Annih" in the installer product name, the runtime
+      #   window-title stage label, AND the IPC schema literal union, so the
+      #   desktop ↔ web IPC contract survives the branding change.
+      # The appId is deliberately left unchanged: fork and official builds
+      # replace each other instead of coexisting, which avoids two backends
+      # sharing one ~/.t3 state.
+      - name: Stamp fork version and branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(node -p "require('./apps/desktop/package.json').version")"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          build_version="${base_version}-annih.${short_sha}"
+          echo "T3CODE_DESKTOP_VERSION=$build_version" >> "$GITHUB_ENV"
+          node -e "
+            const fs = require('fs');
+            const path = 'apps/desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.productName = 'T3 Code (Annih)';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          sed -i 's/? "Nightly" : "Alpha";/? "Nightly" : "Annih";/' apps/desktop/src/app/DesktopEnvironment.ts
+          grep -q '"Annih"' apps/desktop/src/app/DesktopEnvironment.ts || { echo "stage label patch failed"; exit 1; }
+          # The IPC schema validates the stage label — it must also accept "Annih".
+          sed -i 's/"Alpha" | "Dev"/"Annih" | "Alpha" | "Dev"/' packages/contracts/src/ipc.ts
+          grep -q '"Annih"' packages/contracts/src/ipc.ts || { echo "IPC schema stage label patch failed"; exit 1; }
+          echo "Build version: $build_version"
+
       # node-pty's Windows build requires the Spectre-mitigated MSVC libs,
       # which the hosted images don't preinstall (copied from release.yml).
       - name: Install Spectre-mitigated MSVC libs
