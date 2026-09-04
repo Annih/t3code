@@ -4224,6 +4224,14 @@ export default function Sidebar() {
                             onClick={() =>
                               toggleProjectGroupExpanded(section.project, section.expanded)
                             }
+                            onContextMenu={
+                              isElectron
+                                ? (event) => {
+                                    event.preventDefault();
+                                    openProjectSettings(section.project);
+                                  }
+                                : undefined
+                            }
                             aria-expanded={section.expanded}
                             data-testid="sidebar-project-group-toggle"
                             className="mb-1 mt-2 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
