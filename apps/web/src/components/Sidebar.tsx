@@ -49,6 +49,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  MessageSquareIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
@@ -4211,6 +4212,7 @@ export default function Sidebar() {
                             <ProjectFavicon
                               environmentId={section.project.environmentId}
                               cwd={section.project.workspaceRoot}
+                              projectName={section.project.title}
                               faviconPath={section.project.faviconPath}
                               className="size-4 shrink-0"
                             />

@@ -25,7 +25,6 @@ import {
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
-  filterSidebarProjectGroups,
   groupActiveThreadsByProject,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
