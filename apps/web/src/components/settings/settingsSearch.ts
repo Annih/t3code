@@ -156,6 +156,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "settled-threads-placement",
+    title: "Settled threads placement",
+    to: "/settings/general",
+    searchTerms: ["where settled appear inside projects globally"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

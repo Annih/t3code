@@ -1001,6 +1001,47 @@ export interface GroupedActiveThreadSection<TProject, TThread> {
   threads: TThread[];
 }
 
+function bucketThreadsByProject<
+  TProject extends LogicalSidebarProject,
+  TThread extends ScopedSidebarThread & { readonly id: string },
+>(
+  projects: readonly TProject[],
+  threads: readonly TThread[],
+  sort: (threads: TThread[]) => TThread[],
+): { sections: GroupedActiveThreadSection<TProject, TThread>[]; ungrouped: TThread[] } {
+  const groupKeyByProjectRef = new Map(
+    projects.flatMap((project) =>
+      project.memberProjectRefs.map(
+        (projectRef) =>
+          [`${projectRef.environmentId}\0${projectRef.projectId}`, project.projectKey] as const,
+      ),
+    ),
+  );
+  const threadsByProjectKey = new Map<string, TThread[]>();
+  const ungrouped: TThread[] = [];
+  for (const thread of threads) {
+    const projectKey = groupKeyByProjectRef.get(`${thread.environmentId}\0${thread.projectId}`);
+    if (!projectKey) {
+      ungrouped.push(thread);
+      continue;
+    }
+    const existing = threadsByProjectKey.get(projectKey);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      threadsByProjectKey.set(projectKey, [thread]);
+    }
+  }
+
+  return {
+    sections: projects.flatMap((project) => {
+      const threads = threadsByProjectKey.get(project.projectKey);
+      return threads ? [{ project, threads: sort(threads) }] : [];
+    }),
+    ungrouped: sort(ungrouped),
+  };
+}
+
 /**
  * Bucket the active partition under its logical project groups for the
  * grouped sidebar mode. Section order follows the input project order (the
@@ -1018,37 +1059,31 @@ export function groupActiveThreadsByProject<
   projects: readonly TProject[],
   activeThreads: readonly TThread[],
 ): { sections: GroupedActiveThreadSection<TProject, TThread>[]; ungrouped: TThread[] } {
-  const groupKeyByProjectRef = new Map(
-    projects.flatMap((project) =>
-      project.memberProjectRefs.map(
-        (projectRef) =>
-          [`${projectRef.environmentId}\0${projectRef.projectId}`, project.projectKey] as const,
-      ),
-    ),
+  return bucketThreadsByProject(projects, activeThreads, (threads) =>
+    sortThreads(threads, "updated_at"),
   );
-  const threadsByProjectKey = new Map<string, TThread[]>();
-  const ungrouped: TThread[] = [];
-  for (const thread of activeThreads) {
-    const projectKey = groupKeyByProjectRef.get(`${thread.environmentId}\0${thread.projectId}`);
-    if (!projectKey) {
-      ungrouped.push(thread);
-      continue;
-    }
-    const existing = threadsByProjectKey.get(projectKey);
-    if (existing) {
-      existing.push(thread);
-    } else {
-      threadsByProjectKey.set(projectKey, [thread]);
-    }
-  }
+}
 
-  return {
-    sections: projects.flatMap((project) => {
-      const threads = threadsByProjectKey.get(project.projectKey);
-      return threads ? [{ project, threads: sortThreads(threads, "updated_at") }] : [];
+/**
+ * Bucket settled threads under their logical project groups, mirroring the
+ * structure of `groupActiveThreadsByProject` so the caller can present a
+ * unified per-project view. Settled threads within a project sort by
+ * settled timestamp (newest first), consistent with the global settled shelf.
+ */
+export function groupSettledThreadsByProject<
+  TProject extends LogicalSidebarProject,
+  TThread extends ScopedSidebarThread & { readonly id: string; readonly settledAt: string | null },
+>(
+  projects: readonly TProject[],
+  settledThreads: readonly TThread[],
+): { sections: GroupedActiveThreadSection<TProject, TThread>[]; ungrouped: TThread[] } {
+  return bucketThreadsByProject(projects, settledThreads, (threads) =>
+    [...threads].sort((a, b) => {
+      const aTime = a.settledAt ?? "";
+      const bTime = b.settledAt ?? "";
+      return bTime.localeCompare(aTime);
     }),
-    ungrouped: sortThreads(ungrouped, "updated_at"),
-  };
+  );
 }
 
 /**

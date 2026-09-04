@@ -350,6 +350,16 @@ export function useSidebarGroupThreadsByProject(): boolean {
   return settingsHydrated && groupThreadsByProject;
 }
 
+/**
+ * Where settled threads appear in the grouped sidebar. Gated on hydration
+ * for the same reason as `useSidebarGroupThreadsByProject`.
+ */
+export function useSidebarSettledPlacement(): "global" | "in-projects" | "both" {
+  const settingsHydrated = useClientSettingsHydrated();
+  const placement = useClientSettingsValue().sidebarSettledPlacement;
+  return settingsHydrated ? placement : "global";
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,

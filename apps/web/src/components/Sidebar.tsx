@@ -112,7 +112,11 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings, useSidebarGroupThreadsByProject } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useSidebarGroupThreadsByProject,
+  useSidebarSettledPlacement,
+} from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -142,6 +146,7 @@ import {
   firstValidTimestampMs,
   hasUnseenCompletion,
   groupActiveThreadsByProject,
+  groupSettledThreadsByProject,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -2189,6 +2194,7 @@ export default function Sidebar() {
   // Grouped mode only applies to the unscoped list: scoped to one project,
   // a per-project header over every row would restate the scope picker.
   const groupThreadsByProject = useSidebarGroupThreadsByProject();
+  const settledPlacement = useSidebarSettledPlacement();
   const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
@@ -2408,6 +2414,9 @@ export default function Sidebar() {
     [setSettledShelfExpanded],
   );
   const renderedSettledThreads = useMemo(() => {
+    // When settled threads live inside their project sections, the global
+    // shelf is suppressed — no rendered rows for the flat ordered list.
+    if (settledPlacement === "in-projects") return [];
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return [];
     const routeThread = visibleSettledThreads.find(
@@ -2473,6 +2482,16 @@ export default function Sidebar() {
       ungrouped,
     };
   }, [activeThreads, groupedModeActive, projectExpandedById, projectGroups, routeThreadKey]);
+  const settleInProjects =
+    groupedModeActive && (settledPlacement === "in-projects" || settledPlacement === "both");
+  const groupedSettledSections = useMemo(() => {
+    if (!settleInProjects) return null;
+    const { sections, ungrouped } = groupSettledThreadsByProject(
+      projectGroups,
+      settledThreads.slice(0, settledVisibleCount),
+    );
+    return { sections, ungrouped };
+  }, [projectGroups, settleInProjects, settledThreads, settledVisibleCount]);
   const toggleProjectGroupExpanded = useCallback(
     (project: SidebarProjectSnapshot, expanded: boolean) => {
       setProjectExpanded(projectExpansionPreferenceKeys(project), !expanded);
@@ -4250,6 +4269,31 @@ export default function Sidebar() {
                           </li>,
                         );
                       }
+                      if (settleInProjects && groupedSettledSections !== null && section.expanded) {
+                        const settledSection = groupedSettledSections.sections.find(
+                          (s) => s.project.projectKey === section.project.projectKey,
+                        );
+                        if (settledSection && settledSection.threads.length > 0) {
+                          items.push(
+                            <li
+                              key={`project-group-settled:${section.project.projectKey}`}
+                              className={cn(
+                                "list-none",
+                                "mb-1 mt-1 flex items-center gap-2 px-2.5",
+                                isElectron && "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                              )}
+                            >
+                              <span className="text-[10px] font-medium text-muted-foreground/40">
+                                Settled ({settledSection.threads.length})
+                              </span>
+                              <span className="h-px flex-1 bg-sidebar-border/40" />
+                            </li>,
+                          );
+                          for (const thread of settledSection.threads) {
+                            items.push(renderThreadRow(thread, "settled"));
+                          }
+                        }
+                      }
                     }
                     // Threads whose project matches no group (stale refs
                     // mid-sync): rendered headerless at the tail rather than
@@ -4301,7 +4345,9 @@ export default function Sidebar() {
                       items.push(renderThreadRow(thread, "snoozed"));
                     }
                   }
-                  if (settledThreads.length > 0) {
+                  const showGlobalSettled =
+                    settledPlacement === "global" || settledPlacement === "both";
+                  if (showGlobalSettled && settledThreads.length > 0) {
                     items.push(
                       <li
                         key="settled-shelf-header"
@@ -4332,12 +4378,16 @@ export default function Sidebar() {
                       </li>,
                     );
                   }
-                  for (const thread of renderedSettledThreads) {
-                    items.push(renderThreadRow(thread, "settled"));
+                  if (showGlobalSettled) {
+                    for (const thread of renderedSettledThreads) {
+                      items.push(renderThreadRow(thread, "settled"));
+                    }
                   }
                   return items;
                 })()}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                {(settledPlacement === "global" || settledPlacement === "both") &&
+                settledShelfExpanded &&
+                hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
                       type="button"

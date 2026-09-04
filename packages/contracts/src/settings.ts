@@ -44,6 +44,10 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SidebarSettledPlacement = Schema.Literals(["global", "in-projects", "both"]);
+export type SidebarSettledPlacement = typeof SidebarSettledPlacement.Type;
+export const DEFAULT_SIDEBAR_SETTLED_PLACEMENT: SidebarSettledPlacement = "global";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -340,6 +344,13 @@ export const ClientSettingsSchema = Schema.Struct({
   // physical projects merge into one logical project.
   sidebarGroupThreadsByProject: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  // Where settled threads appear when the sidebar is grouped by project.
+  // "global" (default): the single Settled shelf below all groups.
+  // "in-projects": each project section shows its own settled threads.
+  // "both": settled threads appear both per-project and in the global shelf.
+  sidebarSettledPlacement: SidebarSettledPlacement.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_SETTLED_PLACEMENT)),
   ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
@@ -1214,6 +1225,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarGroupThreadsByProject: Schema.optionalKey(Schema.Boolean),
+  sidebarSettledPlacement: Schema.optionalKey(SidebarSettledPlacement),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
