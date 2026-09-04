@@ -2173,6 +2173,22 @@ export function GeneralSettingsPanel() {
           />
         ) : null}
 
+        {settings.sidebarGroupThreadsByProject ? (
+          <SettingsRow
+            {...searchableSetting("multi-project-scope")}
+            description="Select multiple projects in the sidebar scope picker to see only their threads."
+            control={
+              <Switch
+                checked={settings.sidebarMultiProjectScope}
+                onCheckedChange={(checked) =>
+                  updateSettings({ sidebarMultiProjectScope: Boolean(checked) })
+                }
+                aria-label="Multi-project scope"
+              />
+            }
+          />
+        ) : null}
+
         {supportsAutoSettlement ? (
           <>
             <SettingsRow

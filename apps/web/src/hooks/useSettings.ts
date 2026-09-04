@@ -357,7 +357,14 @@ export function useSidebarGroupThreadsByProject(): boolean {
 export function useSidebarSettledPlacement(): "global" | "in-projects" | "both" {
   const settingsHydrated = useClientSettingsHydrated();
   const placement = useClientSettingsValue().sidebarSettledPlacement;
-  return settingsHydrated ? placement : "global";
+  if (!settingsHydrated) return "global";
+  return placement === "in-projects" || placement === "both" ? placement : "global";
+}
+
+export function useSidebarMultiProjectScope(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  if (!settingsHydrated) return false;
+  return useClientSettingsValue().sidebarMultiProjectScope === true;
 }
 
 /** Read current settings for one environment, merged with client-local preferences. */

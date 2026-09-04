@@ -352,6 +352,9 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarSettledPlacement: SidebarSettledPlacement.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_SETTLED_PLACEMENT)),
   ),
+  // When enabled, the project scope picker becomes a multi-select checklist
+  // instead of a single-select combobox. Selecting none = All projects.
+  sidebarMultiProjectScope: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1226,6 +1229,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarGroupThreadsByProject: Schema.optionalKey(Schema.Boolean),
   sidebarSettledPlacement: Schema.optionalKey(SidebarSettledPlacement),
+  sidebarMultiProjectScope: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

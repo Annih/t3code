@@ -115,6 +115,7 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   useClientSettings,
   useSidebarGroupThreadsByProject,
+  useSidebarMultiProjectScope,
   useSidebarSettledPlacement,
 } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
@@ -2191,6 +2192,35 @@ export default function Sidebar() {
       setProjectScopeKey(null);
     }
   }, [projectScopeKey, scopedProjectGroup]);
+  // Multi-project scope: UI-only set, not persisted in contracts.
+  const multiProjectScope = useSidebarMultiProjectScope();
+  const [multiScopeKeys, setMultiScopeKeys] = useState<Set<string>>(new Set());
+  const toggleMultiScopeKey = useCallback((projectKey: string) => {
+    setMultiScopeKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectKey)) {
+        next.delete(projectKey);
+      } else {
+        next.add(projectKey);
+      }
+      return next;
+    });
+  }, []);
+  const clearMultiScope = useCallback(() => setMultiScopeKeys(new Set()), []);
+  // When multi-scope is active, derive scopedProjectKeys from the set of
+  // selected project keys. Empty set = all projects (null).
+  const scopedKeys: ReadonlySet<string> | null = useMemo(() => {
+    if (!multiProjectScope || multiScopeKeys.size === 0) return scopedProjectKeys;
+    const keys = new Set<string>();
+    for (const project of projectGroups) {
+      if (multiScopeKeys.has(project.projectKey)) {
+        for (const ref of project.memberProjectRefs) {
+          keys.add(`${ref.environmentId}:${ref.projectId}`);
+        }
+      }
+    }
+    return keys;
+  }, [multiProjectScope, multiScopeKeys, projectGroups, scopedProjectKeys]);
   // Grouped mode only applies to the unscoped list: scoped to one project,
   // a per-project header over every row would restate the scope picker.
   const groupThreadsByProject = useSidebarGroupThreadsByProject();
@@ -2212,10 +2242,7 @@ export default function Sidebar() {
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
         continue;
       }
-      if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
+      if (scopedKeys !== null && !scopedKeys.has(`${session.environmentId}:${session.projectId}`)) {
         continue;
       }
       count += 1;
@@ -2271,8 +2298,7 @@ export default function Sidebar() {
     const visible = threads.filter(
       (thread) =>
         thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+        (scopedKeys === null || scopedKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2324,7 +2350,7 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [nowMinute, scopedKeys, serverConfigs, snoozeWakeTick, threads]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3807,10 +3833,14 @@ export default function Sidebar() {
                     dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
                   value={selectedProjectScopeItem}
-                  onValueChange={(item) => {
-                    if (!item) return;
-                    setProjectScopeKey(item.value === "all" ? null : item.value);
-                  }}
+                  onValueChange={
+                    multiProjectScope
+                      ? undefined
+                      : (item) => {
+                          if (!item) return;
+                          setProjectScopeKey(item.value === "all" ? null : item.value);
+                        }
+                  }
                 >
                   <ComboboxTrigger
                     render={
@@ -3820,7 +3850,9 @@ export default function Sidebar() {
                       />
                     }
                   >
-                    {scopedProjectGroup ? (
+                    {multiProjectScope && multiScopeKeys.size > 0 ? (
+                      <FolderIcon className="size-4 shrink-0" />
+                    ) : scopedProjectGroup ? (
                       <span className="flex shrink-0">
                         <ProjectFavicon
                           environmentId={scopedProjectGroup.environmentId}
@@ -3835,7 +3867,9 @@ export default function Sidebar() {
                       <FolderIcon className="size-4 shrink-0" />
                     )}
                     <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
+                      {multiProjectScope && multiScopeKeys.size > 0
+                        ? `${multiScopeKeys.size} project${multiScopeKeys.size === 1 ? "" : "s"}`
+                        : (scopedProjectGroup?.displayName ?? "All projects")}
                     </span>
                     <ChevronDownIcon className="-mr-px size-4 shrink-0" />
                   </ComboboxTrigger>
@@ -3871,6 +3905,7 @@ export default function Sidebar() {
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
+                        const isMultiSelected = multiProjectScope && multiScopeKeys.has(item.value);
                         return (
                           <ComboboxItem
                             key={item.value}
@@ -3878,6 +3913,14 @@ export default function Sidebar() {
                             value={item}
                             className="h-8 min-h-8 py-0 font-medium"
                             contentClassName="flex min-w-0 items-center gap-2"
+                            onPointerDown={
+                              multiProjectScope && item.value !== "all"
+                                ? (event) => {
+                                    event.preventDefault();
+                                    toggleMultiScopeKey(item.value);
+                                  }
+                                : undefined
+                            }
                           >
                             {project ? (
                               <ProjectFavicon
@@ -3892,7 +3935,22 @@ export default function Sidebar() {
                               <FolderIcon className="size-4 shrink-0" />
                             )}
                             <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-                            {project ? (
+                            {multiProjectScope && item.value === "all" ? (
+                              <button
+                                type="button"
+                                className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
+                                onPointerDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  clearMultiScope();
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Clear all
+                              </button>
+                            ) : multiProjectScope && isMultiSelected ? (
+                              <CheckIcon className="ml-auto size-3.5 shrink-0" />
+                            ) : project ? (
                               <Button
                                 size="icon-xs"
                                 variant="ghost-muted"
@@ -4152,7 +4210,7 @@ export default function Sidebar() {
                       projectCwdByKey={projectCwdByKey}
                       projectFaviconPathByKey={projectFaviconPathByKey}
                       projectIconByKey={projectIconByKey}
-                      scopedProjectKeys={scopedProjectKeys}
+                      scopedProjectKeys={scopedKeys}
                       routeDraftId={routeDraftIdForRows}
                       onNavigateToDraft={navigateToDraft}
                     />,
