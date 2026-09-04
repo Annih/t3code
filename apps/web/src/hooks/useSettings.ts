@@ -396,29 +396,15 @@ export function useSidebarGroupThreadsByProject(): boolean {
  * hydration for the same reason as `useSidebarGroupThreadsByProject`.
  *
  * `useClientSettingsValue` is called unconditionally — see the comment on
- * `useSidebarGroupThreadsByProject`. Calling it after an early `return`
- * would skip `useSyncExternalStore` on the pre-hydration render, and once
- * hydration completes the hook would appear with no prior fiber state,
- * crashing React.
+ * `useSidebarGroupThreadsByProject`.
+ * Calling it after an early `return` would skip `useSyncExternalStore` on
+ * the pre-hydration render, and once hydration completes the hook would
+ * appear with no prior fiber state, crashing React.
  */
 export function useSidebarMultiProjectScope(): boolean {
   const settingsHydrated = useClientSettingsHydrated();
   const multiProjectScope = useClientSettingsValue().sidebarMultiProjectScope;
   return settingsHydrated && multiProjectScope === true;
-}
-
-/**
- * Whether inactive projects appear in a shelf at the bottom of the grouped
- * sidebar. Gated on hydration for the same reason as
- * `useSidebarGroupThreadsByProject`.
- *
- * `useClientSettingsValue` is called unconditionally — see the comment on
- * `useSidebarMultiProjectScope` for why.
- */
-export function useSidebarShowInactiveProjects(): boolean {
-  const settingsHydrated = useClientSettingsHydrated();
-  const showInactiveProjects = useClientSettingsValue().sidebarShowInactiveProjects;
-  return settingsHydrated && showInactiveProjects === true;
 }
 
 /** Read current settings for one environment, merged with client-local preferences. */
