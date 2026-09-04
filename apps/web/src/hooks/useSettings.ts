@@ -252,11 +252,21 @@ export function useClientSettingsHydrated(): boolean {
 }
 
 function useClientSettingsValue(): ClientSettings {
-  return useSyncExternalStore(
+  const value = useSyncExternalStore(
     subscribeClientSettings,
     getClientSettingsSnapshot,
-    () => DEFAULT_CLIENT_SETTINGS,
+    (): ClientSettings => {
+      try {
+        return DEFAULT_CLIENT_SETTINGS;
+      } catch {
+        return {} as ClientSettings;
+      }
+    },
   );
+  // Defensive: the snapshot or server-side default must never propagate
+  // undefined — a broken schema decode leaves every hook that reads a key
+  // with TypeError: Cannot read properties of undefined.
+  return value && typeof value === "object" ? value : ({} as ClientSettings);
 }
 
 export function mergeEnvironmentSettings(
