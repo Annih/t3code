@@ -4232,8 +4232,23 @@ export default function Sidebar() {
                           </button>
                         </li>,
                       );
-                      for (const thread of section.visibleThreads) {
-                        items.push(renderThreadRow(thread, "active"));
+                      if (section.expanded && section.visibleThreads.length > 0) {
+                        items.push(
+                          <li
+                            key={`project-group-tree:${section.project.projectKey}`}
+                            className={cn(
+                              "list-none",
+                              isElectron &&
+                                "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5 pt-px",
+                            )}
+                          >
+                            <ul role="list" className="flex flex-col gap-px">
+                              {section.visibleThreads.map((thread) =>
+                                renderThreadRow(thread, "active"),
+                              )}
+                            </ul>
+                          </li>,
+                        );
                       }
                     }
                     // Threads whose project matches no group (stale refs
