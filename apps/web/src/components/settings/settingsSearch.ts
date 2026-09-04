@@ -230,6 +230,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["projects no active threads empty settled only"],
   },
   {
+    id: "multi-project-scope",
+    title: "Multi-project scope",
+    to: "/settings/general",
+    searchTerms: ["select multiple projects filter picker"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",
