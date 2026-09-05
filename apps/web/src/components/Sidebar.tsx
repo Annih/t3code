@@ -2512,12 +2512,31 @@ export default function Sidebar() {
     groupedModeActive && (settledPlacement === "in-projects" || settledPlacement === "both");
   const groupedSettledSections = useMemo(() => {
     if (!settleInProjects) return null;
-    const { sections, ungrouped } = groupSettledThreadsByProject(
-      projectGroups,
-      settledThreads.slice(0, settledVisibleCount),
-    );
+    const { sections, ungrouped } = groupSettledThreadsByProject(projectGroups, settledThreads);
     return { sections, ungrouped };
-  }, [projectGroups, settleInProjects, settledThreads, settledVisibleCount]);
+  }, [projectGroups, settleInProjects, settledThreads]);
+  const [perProjectSettledVisible, setPerProjectSettledVisible] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [perProjectSettledExpanded, setPerProjectSettledExpanded] = useState<Map<string, boolean>>(
+    new Map(),
+  );
+  const togglePerProjectSettled = useCallback((projectKey: string) => {
+    setPerProjectSettledExpanded((prev) => {
+      const next = new Map(prev);
+      const current = next.get(projectKey) ?? false;
+      next.set(projectKey, !current);
+      return next;
+    });
+  }, []);
+  const showMoreSettledForProject = useCallback((projectKey: string) => {
+    setPerProjectSettledVisible((prev) => {
+      const next = new Map(prev);
+      const current = next.get(projectKey) ?? SETTLED_TAIL_INITIAL_COUNT;
+      next.set(projectKey, current + SETTLED_TAIL_PAGE_COUNT);
+      return next;
+    });
+  }, []);
   const toggleProjectGroupExpanded = useCallback(
     (project: SidebarProjectSnapshot, expanded: boolean) => {
       setProjectExpanded(projectExpansionPreferenceKeys(project), !expanded);
@@ -4340,23 +4359,60 @@ export default function Sidebar() {
                           (s) => s.project.projectKey === section.project.projectKey,
                         );
                         if (settledSection && settledSection.threads.length > 0) {
+                          const projectKey = section.project.projectKey;
+                          const isExpanded = perProjectSettledExpanded.get(projectKey) ?? false;
+                          const visibleCount =
+                            perProjectSettledVisible.get(projectKey) ?? SETTLED_TAIL_INITIAL_COUNT;
+                          const visibleThreads = settledSection.threads.slice(0, visibleCount);
+                          const hiddenCount = settledSection.threads.length - visibleThreads.length;
                           items.push(
                             <li
-                              key={`project-group-settled:${section.project.projectKey}`}
+                              key={`project-group-settled-header:${projectKey}`}
                               className={cn(
                                 "list-none",
-                                "mb-1 mt-1 flex items-center gap-2 px-2.5",
                                 isElectron && "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
                               )}
                             >
-                              <span className="text-[10px] font-medium text-muted-foreground/40">
-                                Settled ({settledSection.threads.length})
-                              </span>
-                              <span className="h-px flex-1 bg-sidebar-border/40" />
+                              <button
+                                type="button"
+                                onClick={() => togglePerProjectSettled(projectKey)}
+                                className="mb-1 mt-1 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                              >
+                                <span className="text-[10px] font-medium text-muted-foreground/40">
+                                  Settled ({settledSection.threads.length})
+                                </span>
+                                <span className="h-px flex-1 bg-sidebar-border/40" />
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                                    isExpanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
                             </li>,
                           );
-                          for (const thread of settledSection.threads) {
-                            items.push(renderThreadRow(thread, "settled"));
+                          if (isExpanded) {
+                            for (const thread of visibleThreads) {
+                              items.push(renderThreadRow(thread, "settled"));
+                            }
+                            if (hiddenCount > 0) {
+                              items.push(
+                                <li
+                                  key={`project-group-settled-more:${projectKey}`}
+                                  className="list-none"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => showMoreSettledForProject(projectKey)}
+                                    className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                                  >
+                                    <PlusIcon aria-hidden className="size-4 shrink-0" />
+                                    Show {Math.min(hiddenCount, SETTLED_TAIL_PAGE_COUNT)} more
+                                  </button>
+                                </li>,
+                              );
+                            }
                           }
                         }
                       }
