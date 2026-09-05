@@ -98,7 +98,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
             detail: stderr.trim() || `glean CLI exited with code ${exitCode}.`,
           });
         }
-        return stdout;
+        return { stdout: stdout.trim(), stderr: stderr.trim() };
       }).pipe(Effect.scoped);
 
     const buildEventBase = (input: {
@@ -222,9 +222,11 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           return result;
         }
 
-        const responseText = (responseExit.value as string).trim();
+        const { stdout: responseText, stderr: errorText } = responseExit.value;
+        const displayText =
+          responseText.length > 0 ? responseText : errorText.length > 0 ? errorText : "";
 
-        if (responseText.length > 0) {
+        if (displayText.length > 0) {
           const msgItemId = RuntimeItemId.make(`glean-msg-${uuid}`);
           yield* emit({
             ...(yield* buildEventBase({ threadId: input.threadId, turnId, itemId: msgItemId })),
@@ -245,7 +247,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
             type: "content.delta",
             payload: {
               streamKind: "assistant_text" as const,
-              delta: responseText,
+              delta: displayText,
             },
           });
           yield* emit({
@@ -255,7 +257,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
               itemType: "assistant_message",
               status: "completed",
               title: "Assistant message",
-              detail: responseText,
+              detail: displayText,
             },
           });
         }
