@@ -1,4 +1,4 @@
-import { type GleanSettings } from "@t3tools/contracts";
+import { GLEAN_DEFAULT_MODEL, type GleanSettings } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
@@ -9,6 +9,16 @@ const GLEAN_PRESENTATION = {
   displayName: "Glean",
   showInteractionModeToggle: true,
 } as const;
+
+const GLEAN_DEFAULT_MODELS = [
+  {
+    slug: GLEAN_DEFAULT_MODEL,
+    name: "Glean Assistant",
+    isDefault: true,
+    isCustom: false,
+    capabilities: null,
+  },
+];
 
 function resolveToken(config: GleanSettings): string | null {
   if (config.apiToken && config.apiToken.trim().length > 0) {
@@ -28,7 +38,7 @@ export const makePendingGleanProvider = (
         presentation: GLEAN_PRESENTATION,
         enabled: false,
         checkedAt,
-        models: [],
+        models: GLEAN_DEFAULT_MODELS,
         probe: {
           installed: false,
           version: null,
@@ -46,7 +56,7 @@ export const makePendingGleanProvider = (
       presentation: GLEAN_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: [],
+      models: GLEAN_DEFAULT_MODELS,
       probe: {
         installed: false,
         version: null,
@@ -70,7 +80,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
       presentation: GLEAN_PRESENTATION,
       enabled: config.enabled,
       checkedAt,
-      models: [],
+      models: GLEAN_DEFAULT_MODELS,
       probe: {
         installed: false,
         version: null,
@@ -86,7 +96,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
       presentation: GLEAN_PRESENTATION,
       enabled: false,
       checkedAt,
-      models: [],
+      models: GLEAN_DEFAULT_MODELS,
       probe: {
         installed: false,
         version: null,
@@ -116,7 +126,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
       presentation: GLEAN_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: [],
+      models: GLEAN_DEFAULT_MODELS,
       probe: {
         installed: true,
         version: null,
@@ -133,7 +143,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
       presentation: GLEAN_PRESENTATION,
       enabled: true,
       checkedAt,
-      models: [],
+      models: GLEAN_DEFAULT_MODELS,
       probe: {
         installed: true,
         version: null,
@@ -148,7 +158,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
     presentation: GLEAN_PRESENTATION,
     enabled: true,
     checkedAt,
-    models: [],
+    models: GLEAN_DEFAULT_MODELS,
     probe: {
       installed: false,
       version: null,
