@@ -16,6 +16,9 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
@@ -194,7 +197,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           payload: {},
         });
 
-        const args = ["chat", "--save=false"];
+        const args = ["chat", "--save"];
         if (state.chatId) {
           args.push("--resume", state.chatId);
         }
@@ -289,6 +292,26 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
         if (state.abortController) {
           state.abortController.abort();
           state.abortController = null;
+
+          if (!state.chatId) {
+            const sessionDir = `${os.homedir()}/.glean/sessions`;
+            try {
+              const files = fs.readdirSync(sessionDir).filter((f: string) => f.endsWith(".jsonl"));
+              if (files.length > 0) {
+                const latest = files
+                  .map((f: string) => ({
+                    name: f,
+                    mtime: fs.statSync(`${sessionDir}/${f}`).mtimeMs,
+                  }))
+                  .sort((a, b) => b.mtime - a.mtime)[0];
+                if (latest) {
+                  state.chatId = latest.name.replace(/\.jsonl$/, "");
+                }
+              }
+            } catch {
+              // ignore — sessions directory may not exist
+            }
+          }
         }
         yield* emit({
           ...(yield* buildEventBase({ threadId })),
