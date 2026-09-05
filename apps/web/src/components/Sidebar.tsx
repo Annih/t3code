@@ -3903,6 +3903,7 @@ export default function Sidebar() {
                   isItemEqualToValue={(a, b) => a.value === b.value}
                   open={projectScopeMenuState.open}
                   onOpenChange={(open) => {
+                    if (multiProjectScope && !open) return;
                     dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
                   value={selectedProjectScopeItem}
@@ -4011,6 +4012,7 @@ export default function Sidebar() {
                               multiProjectScope && item.value !== "all"
                                 ? (event) => {
                                     event.preventDefault();
+                                    event.stopPropagation();
                                     toggleMultiScopeKey(item.value);
                                   }
                                 : undefined
