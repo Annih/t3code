@@ -46,7 +46,7 @@ export const makeGleanTextGeneration = Effect.fn("makeGleanTextGeneration")(func
   const binaryPath = config.binaryPath || "glean";
 
   const runGleanOneshot = Effect.fn("runGleanOneshot")(function* (prompt: string) {
-    const command = ChildProcess.make(binaryPath, ["chat", "--no-save", prompt], {
+    const command = ChildProcess.make(binaryPath, ["chat", "--save=false", prompt], {
       env,
     });
 
