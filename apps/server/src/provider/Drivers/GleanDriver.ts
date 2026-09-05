@@ -88,7 +88,11 @@ export const GleanDriver: ProviderDriver<GleanSettings, GleanDriverEnv> = {
         effectiveConfig,
         serverConfig.cwd,
         processEnv,
-      ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.map(stampIdentity));
+      ).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+        Effect.map(stampIdentity),
+      );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<GleanSettings>>({

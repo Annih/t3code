@@ -1,9 +1,16 @@
 import { GLEAN_DEFAULT_MODEL, type GleanSettings } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import * as os from "node:os";
+import * as nodeCrypto from "node:crypto";
 
 import { buildServerProvider, type ServerProviderDraft } from "../providerSnapshot.ts";
+
+function sha256First16(input: string): string {
+  return nodeCrypto.createHash("sha256").update(input).digest("hex").substring(0, 16);
+}
 
 const GLEAN_PRESENTATION = {
   displayName: "Glean",
@@ -20,12 +27,43 @@ const GLEAN_DEFAULT_MODELS = [
   },
 ];
 
-function resolveToken(config: GleanSettings): string | null {
+function extractHost(serverUrl: string): string | null {
+  const trimmed = serverUrl.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.host;
+  } catch {
+    return trimmed.replace(/^https?:\/\//, "").split("/")[0] ?? null;
+  }
+}
+
+const resolveToken = Effect.fn("resolveToken")(function* (config: GleanSettings) {
   if (config.apiToken && config.apiToken.trim().length > 0) {
     return config.apiToken.trim();
   }
+  if (config.authType === "oauth") {
+    const host = extractHost(config.serverUrl);
+    if (!host) return null;
+    const home = os.homedir();
+    const hash = sha256First16(host);
+    const tokenPath = `${home}/.local/state/glean-cli/${hash}/tokens.json`;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const exists = yield* fileSystem.exists(tokenPath).pipe(Effect.orElseSucceed(() => false));
+    if (!exists) return null;
+    const content = yield* fileSystem
+      .readFileString(tokenPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    if (content.length === 0) return null;
+    try {
+      const parsed = JSON.parse(content);
+      return typeof parsed.access_token === "string" ? parsed.access_token : null;
+    } catch {
+      return null;
+    }
+  }
   return null;
-}
+});
 
 export const makePendingGleanProvider = (
   gleanSettings: GleanSettings,
@@ -71,7 +109,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
   config: GleanSettings,
   _cwd: string,
   _env: NodeJS.ProcessEnv,
-): Effect.fn.Return<ServerProviderDraft, never, HttpClient.HttpClient> {
+): Effect.fn.Return<ServerProviderDraft, never, FileSystem.FileSystem | HttpClient.HttpClient> {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const serverUrl = config.serverUrl.trim();
 
@@ -107,7 +145,7 @@ export const checkGleanProviderStatus = Effect.fn("checkGleanProviderStatus")(fu
     });
   }
 
-  const token = resolveToken(config);
+  const token = yield* resolveToken(config);
   const searchUrl = `${serverUrl}/rest/api/v1/search`;
 
   let request = HttpClientRequest.post(searchUrl).pipe(

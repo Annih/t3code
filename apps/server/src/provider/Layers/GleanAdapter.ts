@@ -1,5 +1,6 @@
 import {
   EventId,
+  GLEAN_DEFAULT_MODEL,
   type GleanSettings,
   type ProviderRuntimeEvent,
   ProviderDriverKind,
@@ -11,9 +12,17 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import * as os from "node:os";
+import * as nodeCrypto from "node:crypto";
+
+function sha256First16(input: string): string {
+  return nodeCrypto.createHash("sha256").update(input).digest("hex").substring(0, 16);
+}
 
 import {
   ProviderAdapterRequestError,
@@ -60,12 +69,47 @@ interface GleanChatResponse {
   backendTimeMillis?: number;
 }
 
-function resolveToken(config: GleanSettings): string | null {
+function extractHost(serverUrl: string): string | null {
+  const trimmed = serverUrl.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.host;
+  } catch {
+    return trimmed.replace(/^https?:\/\//, "").split("/")[0] ?? null;
+  }
+}
+
+function makeOAuthTokenPath(host: string): string {
+  const home = os.homedir();
+  const hash = sha256First16(host);
+  return `${home}/.local/state/glean-cli/${hash}/tokens.json`;
+}
+
+const resolveToken = Effect.fn("resolveToken")(function* (config: GleanSettings) {
   if (config.apiToken && config.apiToken.trim().length > 0) {
     return config.apiToken.trim();
   }
+  if (config.authType === "oauth") {
+    const host = extractHost(config.serverUrl);
+    if (!host) return null;
+    const tokenPath = makeOAuthTokenPath(host);
+    const fileSystem = yield* FileSystem.FileSystem;
+    const exists = yield* fileSystem.exists(tokenPath).pipe(Effect.orElseSucceed(() => false));
+    if (!exists) return null;
+    const content = yield* fileSystem
+      .readFileString(tokenPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    if (content.length === 0) return null;
+    try {
+      const parsed = JSON.parse(content);
+      return typeof parsed.access_token === "string" ? parsed.access_token : null;
+    } catch {
+      return null;
+    }
+  }
   return null;
-}
+});
 
 function buildRequest(
   url: string,
@@ -115,8 +159,12 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
   return Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
     const httpClientService = yield* HttpClient.HttpClient;
+    const fileSystem = yield* FileSystem.FileSystem;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, GleanSessionState>();
+
+    const getToken = () =>
+      resolveToken(config).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
 
     yield* Effect.addFinalizer(() =>
       Effect.gen(function* () {
@@ -221,7 +269,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
         const turnId = TurnId.make(`glean-turn-${uuid}`);
         const serverUrl = config.serverUrl.trim();
         const chatUrl = `${serverUrl}/rest/api/v1/chat`;
-        const token = resolveToken(config);
+        const token = yield* getToken();
 
         const body: Record<string, unknown> = {
           messages: [
@@ -610,7 +658,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
 
         const serverUrl = config.serverUrl.trim();
         const getChatUrl = `${serverUrl}/rest/api/v1/getchat`;
-        const token = resolveToken(config);
+        const token = yield* getToken();
 
         const request = buildRequest(getChatUrl, { id: state.chatId }, token);
         const responseExit = yield* Effect.exit(httpClientService.execute(request));
