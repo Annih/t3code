@@ -125,7 +125,9 @@ jobs:
           sed -i 's/? "Nightly" : "Alpha";/? "Nightly" : "Annih";/' apps/desktop/src/app/DesktopEnvironment.ts
           grep -q '"Annih"' apps/desktop/src/app/DesktopEnvironment.ts || { echo "stage label patch failed"; exit 1; }
           # The IPC schema validates the stage label — it must also accept "Annih".
+          # Both the type alias (line ~172) and the Schema.Literals (line ~187) need patching.
           sed -i 's/"Alpha" | "Dev"/"Annih" | "Alpha" | "Dev"/' packages/contracts/src/ipc.ts
+          sed -i 's/"Alpha", "Dev"/"Annih", "Alpha", "Dev"/' packages/contracts/src/ipc.ts
           grep -q '"Annih"' packages/contracts/src/ipc.ts || { echo "IPC schema stage label patch failed"; exit 1; }
           echo "Build version: $build_version"
 
