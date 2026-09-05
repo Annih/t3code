@@ -32,6 +32,15 @@ const readStreamAsString = <E>(
     ),
   );
 
+const stripJsonWrap = (text: string): string => {
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed.title === "string" ? parsed.title : text;
+  } catch {
+    return text;
+  }
+};
+
 const firstNonEmptyLine = (text: string): string =>
   text
     .split(/\r?\n/)
@@ -118,7 +127,7 @@ export const makeGleanTextGeneration = Effect.fn("makeGleanTextGeneration")(func
       );
 
       const lines = response.split(/\r?\n/).map((line) => line.trim());
-      const subject = lines[0]?.trim() ?? "";
+      const subject = stripJsonWrap(lines[0]?.trim() ?? "");
       const body = lines.slice(1).join("\n").trim();
 
       return {
@@ -204,7 +213,7 @@ export const makeGleanTextGeneration = Effect.fn("makeGleanTextGeneration")(func
       );
 
       return {
-        title: sanitizeThreadTitle(firstNonEmptyLine(response)),
+        title: sanitizeThreadTitle(stripJsonWrap(firstNonEmptyLine(response))),
       };
     });
 

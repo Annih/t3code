@@ -6,6 +6,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeItemId,
+  RuntimeRequestId,
   type ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -299,14 +300,22 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                     options: Array<{ label: string; description: string; value?: string }>;
                   }>;
                   if (userInputQuestions.length > 0) {
-                    yield* emit({
-                      ...(yield* buildEventBase({
+                    if (typeof msg.messageId === "string" && msg.messageId.length > 0) {
+                      const requestId = RuntimeRequestId.make(msg.messageId);
+                      const base = yield* buildEventBase({
                         threadId: input.threadId,
                         turnId,
-                      })),
-                      type: "user-input.requested",
-                      payload: { questions: userInputQuestions },
-                    });
+                      });
+                      yield* emit({
+                        ...base,
+                        requestId,
+                        type: "user-input.requested",
+                        payload: {
+                          questions: userInputQuestions,
+                          responseMode: "message" as const,
+                        },
+                      });
+                    }
                   }
                 }
               }
