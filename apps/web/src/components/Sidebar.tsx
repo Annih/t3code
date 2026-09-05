@@ -1886,6 +1886,9 @@ export default function Sidebar() {
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
+  const groupThreadsByProject = useSidebarGroupThreadsByProject();
+  const showInactiveProjects = useSidebarShowInactiveProjects();
+  const multiProjectScope = useSidebarMultiProjectScope();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2193,7 +2196,6 @@ export default function Sidebar() {
     }
   }, [projectScopeKey, scopedProjectGroup]);
   // Multi-project scope: UI-only set, not persisted in contracts.
-  const multiProjectScope = useSidebarMultiProjectScope();
   const [multiScopeKeys, setMultiScopeKeys] = useState<Set<string>>(new Set());
   const multiSelectClickedRef = useRef(false);
   const toggleMultiScopeKey = useCallback((projectKey: string) => {
@@ -2227,8 +2229,6 @@ export default function Sidebar() {
   }, [multiProjectScope, multiScopeKeys, projectGroups, scopedProjectKeys]);
   // Grouped mode only applies to the unscoped list: scoped to one project,
   // a per-project header over every row would restate the scope picker.
-  const groupThreadsByProject = useSidebarGroupThreadsByProject();
-  const showInactiveProjects = useSidebarShowInactiveProjects();
   const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
