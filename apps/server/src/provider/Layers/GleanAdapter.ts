@@ -194,7 +194,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           payload: {},
         });
 
-        const args = ["chat", "--no-save"];
+        const args = ["chat", "--save=false"];
         if (state.chatId) {
           args.push("--resume", state.chatId);
         }
