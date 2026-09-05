@@ -275,6 +275,26 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
               continue;
             }
 
+            if (msg.messageType === "ARTIFACT_PAPER" || msg.messageType === "ARTIFACT_MESSAGE") {
+              const info = msg.artifactInfo as Record<string, unknown> | undefined;
+              const artifactId = typeof info?.id === "string" ? info.id : "unknown";
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: input.threadId,
+                  turnId,
+                  itemId: `glean-artifact-${artifactId}`,
+                })),
+                type: "item.completed",
+                payload: {
+                  itemType: "artifact_reference",
+                  status: "completed",
+                  title: msg.messageType === "ARTIFACT_PAPER" ? "Glean Canvas" : "Glean Artifact",
+                  data: msg.artifactInfo ?? {},
+                },
+              });
+              continue;
+            }
+
             if (msg.messageType === "ARTIFACT_USER_QUESTIONS") {
               const requestId = typeof msg.messageId === "string" ? msg.messageId : undefined;
               const fragments = Array.isArray(msg.fragments)
