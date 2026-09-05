@@ -6,7 +6,6 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeItemId,
-  RuntimeRequestId,
   type ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -274,48 +273,28 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                 const questions = (artifact?.clarifyingQuestionsContent as Record<string, unknown>)
                   ?.questions;
                 if (Array.isArray(questions)) {
-                  const userInputQuestions = (questions as Array<Record<string, unknown>>).flatMap(
-                    (q) => {
-                      const question = typeof q.question === "string" ? q.question : "";
-                      const options = Array.isArray(q.options)
-                        ? (q.options as Array<string>).map((opt) => ({
-                            label: opt,
-                            description: "",
-                          }))
-                        : [];
-                      if (question.length === 0 || options.length === 0) return [];
-                      return [
-                        {
-                          id: `glean-q-${question.substring(0, 20)}`,
-                          header: question.substring(0, 80),
-                          question,
-                          options,
-                        },
-                      ];
-                    },
-                  ) as Array<{
-                    id: string;
-                    header: string;
-                    question: string;
-                    options: Array<{ label: string; description: string; value?: string }>;
-                  }>;
-                  if (userInputQuestions.length > 0) {
-                    if (typeof msg.messageId === "string" && msg.messageId.length > 0) {
-                      const requestId = RuntimeRequestId.make(msg.messageId);
-                      const base = yield* buildEventBase({
+                  const lines: Array<string> = [];
+                  for (const q of questions as Array<Record<string, unknown>>) {
+                    const question = typeof q.question === "string" ? q.question : "";
+                    if (question.length === 0) continue;
+                    lines.push(`- ${question}`);
+                    const options = Array.isArray(q.options) ? (q.options as Array<string>) : [];
+                    for (const opt of options.slice(0, 5)) {
+                      lines.push(`  - ${opt}`);
+                    }
+                  }
+                  if (lines.length > 0) {
+                    yield* emit({
+                      ...(yield* buildEventBase({
                         threadId: input.threadId,
                         turnId,
-                      });
-                      yield* emit({
-                        ...base,
-                        requestId,
-                        type: "user-input.requested",
-                        payload: {
-                          questions: userInputQuestions,
-                          responseMode: "message" as const,
-                        },
-                      });
-                    }
+                      })),
+                      type: "content.delta",
+                      payload: {
+                        streamKind: "assistant_text" as const,
+                        delta: lines.join("\n") + "\n",
+                      },
+                    });
                   }
                 }
               }
