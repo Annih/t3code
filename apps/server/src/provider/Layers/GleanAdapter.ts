@@ -6,6 +6,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeItemId,
+  RuntimeRequestId,
   type ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -265,40 +266,53 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
             }
 
             if (msg.messageType === "ARTIFACT_USER_QUESTIONS") {
+              const requestId = typeof msg.messageId === "string" ? msg.messageId : undefined;
               const fragments = Array.isArray(msg.fragments)
                 ? (msg.fragments as Array<Record<string, unknown>>)
                 : [];
+              const allQuestions: Array<{
+                id: string;
+                header: string;
+                question: string;
+                options: Array<{ label: string; description: string; value?: string }>;
+              }> = [];
               for (const fragment of fragments) {
                 const artifact = fragment.artifact as Record<string, unknown> | undefined;
-                const questions = (artifact?.clarifyingQuestionsContent as Record<string, unknown>)
-                  ?.questions;
-                if (Array.isArray(questions)) {
-                  const lines: Array<string> = [];
-                  lines.push("\n**Glean needs more details:**\n");
-                  for (const q of questions as Array<Record<string, unknown>>) {
-                    const question = typeof q.question === "string" ? q.question : "";
-                    if (question.length === 0) continue;
-                    lines.push(`**${question}**`);
-                    const options = Array.isArray(q.options) ? (q.options as Array<string>) : [];
-                    for (const opt of options.slice(0, 5)) {
-                      lines.push(`  • ${opt}`);
-                    }
-                    lines.push("");
-                  }
-                  if (lines.length > 0) {
-                    yield* emit({
-                      ...(yield* buildEventBase({
-                        threadId: input.threadId,
-                        turnId,
-                      })),
-                      type: "content.delta",
-                      payload: {
-                        streamKind: "assistant_text" as const,
-                        delta: lines.join("\n") + "\n",
-                      },
-                    });
-                  }
+                const cqc = artifact?.clarifyingQuestionsContent as
+                  | Record<string, unknown>
+                  | undefined;
+                const questions = cqc?.questions;
+                if (!Array.isArray(questions)) continue;
+                for (const q of questions as Array<Record<string, unknown>>) {
+                  const question = typeof q.question === "string" ? q.question : "";
+                  const options = Array.isArray(q.options)
+                    ? (q.options as Array<string>).map((opt) => ({
+                        label: opt,
+                        description: "",
+                      }))
+                    : [];
+                  if (question.length === 0 || options.length === 0) continue;
+                  allQuestions.push({
+                    id: `glean-q-${question.substring(0, 30)}`,
+                    header: question.substring(0, 80),
+                    question,
+                    options,
+                  });
                 }
+              }
+              if (allQuestions.length > 0 && requestId) {
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: input.threadId,
+                    turnId,
+                  })),
+                  requestId: RuntimeRequestId.make(requestId),
+                  type: "user-input.requested",
+                  payload: {
+                    questions: allQuestions,
+                    responseMode: "message" as const,
+                  },
+                });
               }
               continue;
             }
@@ -381,8 +395,47 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
     const respondToRequest: ProviderAdapterShape<ProviderAdapterError>["respondToRequest"] = () =>
       Effect.void;
 
-    const respondToUserInput: ProviderAdapterShape<ProviderAdapterError>["respondToUserInput"] =
-      () => Effect.void;
+    const respondToUserInput: ProviderAdapterShape<ProviderAdapterError>["respondToUserInput"] = (
+      threadId,
+      _requestId,
+      answers,
+    ) =>
+      Effect.gen(function* () {
+        const state = sessions.get(threadId);
+        if (!state) return;
+
+        const lines: Array<string> = [];
+        for (const [questionId, answer] of Object.entries(answers)) {
+          const shortQuestion = String(questionId)
+            .replace(/^glean-q-/, "")
+            .substring(0, 60);
+          const answerText = Array.isArray(answer) ? answer.join(", ") : String(answer);
+          if (answerText.trim().length === 0) continue;
+          lines.push(`${shortQuestion}: ${answerText.trim()}`);
+        }
+
+        if (lines.length === 0) return;
+
+        const responseText = lines.join("\n");
+        const args = state.chatId
+          ? ["chat", "--save", "--resume", state.chatId, responseText]
+          : ["chat", "--save", responseText];
+
+        const responseExit = yield* Effect.exit(runGleanCli(args));
+        if (responseExit._tag === "Success") {
+          const { stdout } = responseExit.value;
+          if (stdout.length > 0) {
+            yield* emit({
+              ...(yield* buildEventBase({ threadId })),
+              type: "content.delta",
+              payload: {
+                streamKind: "assistant_text" as const,
+                delta: stdout,
+              },
+            });
+          }
+        }
+      });
 
     const stopSession: ProviderAdapterShape<ProviderAdapterError>["stopSession"] = (threadId) =>
       Effect.gen(function* () {
