@@ -751,7 +751,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // "grouped" is the slim layout for project-grouped active rows: the
   // project favicon (redundant under a project header) yields its slot to
   // the provider icon.
-  variant: "card" | "slim" | "grouped";
+  variant: "card" | "slim" | "grouped" | "group-settled";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1267,7 +1267,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           // Sidebar chrome follows the interface font; tabular digits keep the
           // number from reflowing as PR states stream in.
           "shrink-0 text-xs tabular-nums hover:underline",
-          variant === "slim" && variantAction === "unsettle"
+          (variant === "slim" || variant === "group-settled") && variantAction === "unsettle"
             ? props.isActive
               ? "text-secondary-label"
               : cn("text-secondary-label transition-colors", settledPrHoverClass)
@@ -1333,7 +1333,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
-  if (variant === "slim" || variant === "grouped") {
+  if (variant === "slim" || variant === "grouped" || variant === "group-settled") {
     return (
       <li
         data-thread-item
@@ -4162,7 +4162,7 @@ export default function Sidebar() {
                 {(() => {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
-                    section: "pinned" | "active" | "snoozed" | "settled",
+                    section: "pinned" | "active" | "snoozed" | "settled" | "group-settled",
                     sortable?: SortablePinnedRowBag,
                   ) => {
                     const threadKey = scopedThreadKey(
@@ -4177,7 +4177,14 @@ export default function Sidebar() {
                     const isCard =
                       section === "pinned" ||
                       (section === "active" && groupedActiveSections === null);
-                    const rowVariant = isCard ? "card" : section === "active" ? "grouped" : "slim";
+                    const rowVariant = isCard
+                      ? "card"
+                      : section === "active"
+                        ? "grouped"
+                        : section === "group-settled"
+                          ? "group-settled"
+                          : "slim";
+                    const keyVariant = section === "group-settled" ? "group-settled" : rowVariant;
                     return (
                       <SidebarThreadRow
                         // Keyed per variant on purpose: when a thread settles,
@@ -4186,14 +4193,14 @@ export default function Sidebar() {
                         // FLIP-sliding through every row in between (rows here
                         // are translucent, so a crossing row reads as text
                         // painted over text).
-                        key={`${threadKey}:${rowVariant}`}
+                        key={`${threadKey}:${keyVariant}`}
                         thread={thread}
                         variant={rowVariant}
                         // Snoozed rows wake, settled rows un-settle, and cards settle.
                         variantAction={
                           section === "snoozed"
                             ? "unsnooze"
-                            : section === "settled"
+                            : section === "settled" || section === "group-settled"
                               ? "unsettle"
                               : "settle"
                         }
@@ -4486,7 +4493,7 @@ export default function Sidebar() {
                           );
                           if (isExpanded) {
                             for (const thread of visibleThreads) {
-                              items.push(renderThreadRow(thread, "settled"));
+                              items.push(renderThreadRow(thread, "group-settled"));
                             }
                             if (hiddenCount > 0) {
                               items.push(
