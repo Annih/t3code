@@ -274,14 +274,16 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                   ?.questions;
                 if (Array.isArray(questions)) {
                   const lines: Array<string> = [];
+                  lines.push("\n**Glean needs more details:**\n");
                   for (const q of questions as Array<Record<string, unknown>>) {
                     const question = typeof q.question === "string" ? q.question : "";
                     if (question.length === 0) continue;
-                    lines.push(`- ${question}`);
+                    lines.push(`**${question}**`);
                     const options = Array.isArray(q.options) ? (q.options as Array<string>) : [];
                     for (const opt of options.slice(0, 5)) {
-                      lines.push(`  - ${opt}`);
+                      lines.push(`  • ${opt}`);
                     }
+                    lines.push("");
                   }
                   if (lines.length > 0) {
                     yield* emit({
