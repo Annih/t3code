@@ -3981,19 +3981,17 @@ export default function Sidebar() {
                           className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 text-xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                           onPointerDown={(event) => {
                             event.preventDefault();
-                            selectAllProjects();
+                            if (multiScopeKeys.size === projectGroups.length) {
+                              clearMultiScope();
+                            } else {
+                              selectAllProjects();
+                            }
                           }}
                           onClick={(event) => event.stopPropagation()}
                         >
-                          <CheckIcon
-                            className={cn(
-                              "size-3.5 shrink-0",
-                              multiScopeKeys.size === projectGroups.length
-                                ? "opacity-100"
-                                : "opacity-0",
-                            )}
-                          />
-                          Select all
+                          {multiScopeKeys.size === projectGroups.length
+                            ? "Deselect all"
+                            : "Select all"}
                         </button>
                       </div>
                     ) : null}
