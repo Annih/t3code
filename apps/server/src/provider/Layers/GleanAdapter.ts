@@ -275,10 +275,12 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           messages: [
             {
               author: "USER",
+              messageType: "CONTENT",
               fragments: [{ text }],
             },
           ],
           saveChat: true,
+          stream: true,
           agentConfig: {
             agent: "general",
             mode: "DEFAULT",
