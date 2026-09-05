@@ -407,6 +407,20 @@ export function useSidebarMultiProjectScope(): boolean {
   return settingsHydrated && multiProjectScope === true;
 }
 
+/**
+ * Whether inactive projects appear in a shelf at the bottom of the grouped
+ * sidebar. Gated on hydration for the same reason as
+ * `useSidebarGroupThreadsByProject`.
+ *
+ * `useClientSettingsValue` is called unconditionally — see the comment on
+ * `useSidebarMultiProjectScope` for why.
+ */
+export function useSidebarShowInactiveProjects(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  const showInactiveProjects = useClientSettingsValue().sidebarShowInactiveProjects;
+  return settingsHydrated && showInactiveProjects === true;
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,

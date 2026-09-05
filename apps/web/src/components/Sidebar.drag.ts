@@ -123,6 +123,7 @@ export function createSidebarSortingStrategy(input: {
       active: [],
       snoozed: [],
       settled: [],
+      "group-settled": [],
     };
     let cardHeight = input.cardHeight;
     let slimHeight = input.slimHeight;

@@ -113,7 +113,7 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 // order. Snoozed rows can leave the shelf, but dropping into it is not
 // supported because snoozing requires a wake time.
 
-export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
+export type SidebarSection = "pinned" | "active" | "snoozed" | "settled" | "group-settled";
 
 /** Sortable ids: thread rows use their scoped key; structural items use a
     colon-free prefix: scoped thread keys always contain a colon. */
@@ -161,7 +161,7 @@ function sectionAtSidebarSlot(items: readonly SidebarListItem[], index: number):
 /** Resolve the destination section and manual order from an arrayMove across
  * the separators. The snoozed shelf is never a destination. */
 export type SidebarDropTarget = {
-  readonly section: "pinned" | "active" | "settled";
+  readonly section: "pinned" | "active" | "settled" | "group-settled";
   readonly pinnedOrder: readonly string[];
   readonly activeOrder: readonly string[];
 };
@@ -295,6 +295,7 @@ export function planSidebarThreadDrop(input: {
       };
     }
     case "settled":
+    case "group-settled":
       return activeSection === "settled" ? { kind: "none" } : { kind: "settle" };
     case "pinned": {
       const order = target.pinnedOrder;
@@ -345,7 +346,12 @@ export function applySidebarThreadDrop<
     | "settledOverride"
     | "unsettledAt"
   >,
->(thread: T, section: "pinned" | "active" | "settled", now: string, orderKey?: string): T {
+>(
+  thread: T,
+  section: "pinned" | "active" | "settled" | "group-settled",
+  now: string,
+  orderKey?: string,
+): T {
   const wasSettled = thread.settledOverride === "settled";
   const awake = { ...thread, snoozedAt: null, snoozedUntil: null };
   if (section === "settled") {

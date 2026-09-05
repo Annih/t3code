@@ -2573,7 +2573,7 @@ export default function Sidebar() {
   const [optimisticDrop, setOptimisticDrop] = useState<{
     readonly key: string;
     readonly sourceSection: SidebarSection;
-    readonly section: "pinned" | "active" | "settled";
+    readonly section: "pinned" | "active" | "settled" | "group-settled";
     readonly occurredAt: string;
     readonly clearsSnooze: boolean;
     /** Full destination order for pinned and active drops. */
@@ -4652,12 +4652,7 @@ export default function Sidebar() {
                   </ComboboxTrigger>
                   <ComboboxPopup
                     align="start"
-                    // Anchored to the search field, not the 28px trigger: the
-                    // popup opens under the field, is at least as wide as it,
-                    // and grows to fit project names up to a cap, past which
-                    // the rows truncate.
-                    anchor={headerSearchRef}
-                    className="max-w-[min(18rem,var(--available-width))] overflow-hidden"
+                    className="w-(--anchor-width) min-w-0 overflow-hidden"
                   >
                     <ComboboxSearchInput
                       aria-label="Search projects"
