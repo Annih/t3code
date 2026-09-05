@@ -16,9 +16,6 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
@@ -197,11 +194,9 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           payload: {},
         });
 
-        const args = ["chat", "--save"];
-        if (state.chatId) {
-          args.push("--resume", state.chatId);
-        }
-        args.push(text);
+        const args = state.chatId
+          ? ["chat", "--raw", "--save", "--resume", state.chatId, text]
+          : ["chat", "--raw", "--save", text];
 
         const responseExit = yield* Effect.exit(runGleanCli(args));
 
@@ -225,56 +220,98 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           return result;
         }
 
-        const { stdout: responseText, stderr: errorText } = responseExit.value;
-        const displayText =
-          responseText.length > 0 ? responseText : errorText.length > 0 ? errorText : "";
+        const { stdout: rawOutput } = responseExit.value;
+        const lines = rawOutput.split("\n").filter((l) => l.trim().length > 0);
+        let turnCompleted = false;
+        const accumulatedText = new Map<string, string>();
 
-        if (displayText.length > 0) {
-          const msgItemId = RuntimeItemId.make(`glean-msg-${uuid}`);
+        for (const line of lines) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+
+          const chatId = typeof parsed.chatId === "string" ? parsed.chatId : undefined;
+          if (chatId && !state.chatId) {
+            state.chatId = chatId;
+          }
+
+          if (typeof parsed.chat === "object" && parsed.chat !== null) {
+            const chat = parsed.chat as Record<string, unknown>;
+            if (typeof chat.name === "string") {
+              yield* emit({
+                ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
+                type: "thread.metadata.updated",
+                payload: { name: chat.name },
+              });
+            }
+            continue;
+          }
+
+          const messages = Array.isArray(parsed.messages)
+            ? (parsed.messages as Array<Record<string, unknown>>)
+            : [];
+          for (const msg of messages) {
+            if (msg.messageType === "CONTROL") {
+              turnCompleted = true;
+              yield* emit({
+                ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
+                type: "turn.completed",
+                payload: { state: "completed", stopReason: "stop" },
+              });
+              continue;
+            }
+
+            if (msg.messageType !== "CONTENT") continue;
+
+            const messageId = typeof msg.messageId === "string" ? msg.messageId : undefined;
+            const fragments = Array.isArray(msg.fragments)
+              ? (msg.fragments as Array<Record<string, unknown>>)
+              : [];
+            for (const fragment of fragments) {
+              const delta = typeof fragment.text === "string" ? fragment.text : "";
+              if (delta.length === 0) continue;
+
+              const key = messageId ?? "default";
+              const existing = accumulatedText.get(key) ?? "";
+              accumulatedText.set(key, existing + delta);
+
+              yield* emit({
+                ...(yield* buildEventBase({
+                  threadId: input.threadId,
+                  turnId,
+                  itemId: RuntimeItemId.make(`glean-msg-${key}`),
+                })),
+                type: "content.delta",
+                payload: { streamKind: "assistant_text", delta },
+              });
+            }
+          }
+        }
+
+        if (!turnCompleted) {
+          const fullText = [...accumulatedText.values()].join("");
+          if (fullText.length > 0) {
+            yield* emit({
+              ...(yield* buildEventBase({
+                threadId: input.threadId,
+                turnId,
+                itemId: RuntimeItemId.make(`glean-msg-${uuid}`),
+              })),
+              type: "content.delta",
+              payload: { streamKind: "assistant_text", delta: fullText },
+            });
+          }
           yield* emit({
-            ...(yield* buildEventBase({ threadId: input.threadId, turnId, itemId: msgItemId })),
-            type: "item.started",
-            payload: {
-              itemType: "assistant_message",
-              status: "inProgress",
-              title: "Assistant message",
-            },
-          });
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId: input.threadId,
-              turnId,
-              itemId: msgItemId,
-              raw: { source: "glean.ndjson" as const, payload: responseText },
-            })),
-            type: "content.delta",
-            payload: {
-              streamKind: "assistant_text" as const,
-              delta: displayText,
-            },
-          });
-          yield* emit({
-            ...(yield* buildEventBase({ threadId: input.threadId, turnId, itemId: msgItemId })),
-            type: "item.completed",
-            payload: {
-              itemType: "assistant_message",
-              status: "completed",
-              title: "Assistant message",
-              detail: displayText,
-            },
+            ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
+            type: "turn.completed",
+            payload: { state: "completed", stopReason: "stop" },
           });
         }
 
         state.abortController = null;
-
-        yield* emit({
-          ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
-          type: "turn.completed",
-          payload: {
-            state: "completed",
-            stopReason: "stop",
-          },
-        });
 
         const result: ProviderTurnStartResult = { threadId: input.threadId, turnId };
         return result;
@@ -292,26 +329,6 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
         if (state.abortController) {
           state.abortController.abort();
           state.abortController = null;
-
-          if (!state.chatId) {
-            const sessionDir = `${os.homedir()}/.glean/sessions`;
-            try {
-              const files = fs.readdirSync(sessionDir).filter((f: string) => f.endsWith(".jsonl"));
-              if (files.length > 0) {
-                const latest = files
-                  .map((f: string) => ({
-                    name: f,
-                    mtime: fs.statSync(`${sessionDir}/${f}`).mtimeMs,
-                  }))
-                  .sort((a, b) => b.mtime - a.mtime)[0];
-                if (latest) {
-                  state.chatId = latest.name.replace(/\.jsonl$/, "");
-                }
-              }
-            } catch {
-              // ignore — sessions directory may not exist
-            }
-          }
         }
         yield* emit({
           ...(yield* buildEventBase({ threadId })),
