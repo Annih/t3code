@@ -264,6 +264,55 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
               continue;
             }
 
+            if (msg.messageType === "ARTIFACT_USER_QUESTIONS") {
+              const fragments = Array.isArray(msg.fragments)
+                ? (msg.fragments as Array<Record<string, unknown>>)
+                : [];
+              for (const fragment of fragments) {
+                const artifact = fragment.artifact as Record<string, unknown> | undefined;
+                const questions = (artifact?.clarifyingQuestionsContent as Record<string, unknown>)
+                  ?.questions;
+                if (Array.isArray(questions)) {
+                  const userInputQuestions = (questions as Array<Record<string, unknown>>).flatMap(
+                    (q) => {
+                      const question = typeof q.question === "string" ? q.question : "";
+                      const options = Array.isArray(q.options)
+                        ? (q.options as Array<string>).map((opt) => ({
+                            label: opt,
+                            description: "",
+                          }))
+                        : [];
+                      if (question.length === 0 || options.length === 0) return [];
+                      return [
+                        {
+                          id: `glean-q-${question.substring(0, 20)}`,
+                          header: question.substring(0, 80),
+                          question,
+                          options,
+                        },
+                      ];
+                    },
+                  ) as Array<{
+                    id: string;
+                    header: string;
+                    question: string;
+                    options: Array<{ label: string; description: string; value?: string }>;
+                  }>;
+                  if (userInputQuestions.length > 0) {
+                    yield* emit({
+                      ...(yield* buildEventBase({
+                        threadId: input.threadId,
+                        turnId,
+                      })),
+                      type: "user-input.requested",
+                      payload: { questions: userInputQuestions },
+                    });
+                  }
+                }
+              }
+              continue;
+            }
+
             if (msg.messageType !== "CONTENT") continue;
 
             const messageId = typeof msg.messageId === "string" ? msg.messageId : undefined;
