@@ -16,6 +16,8 @@ import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 
 import {
   ProviderAdapterRequestError,
@@ -565,13 +567,64 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
         }
 
         const syncExit = yield* Effect.exit(
-          runGleanCli(["chat", "sync", "--chat-id", state.chatId]),
+          runGleanCli(["chat", "sync", "--full", "--chat-id", state.chatId]),
         );
         if (syncExit._tag === "Failure") {
           return { threadId, turns: [] };
         }
 
-        return { threadId, turns: [] };
+        const turns: Array<{ id: TurnId; items: ReadonlyArray<unknown> }> = [];
+        const sessionPath = `${os.homedir()}/.glean/sessions/${state.chatId}.jsonl`;
+        if (!fs.existsSync(sessionPath)) {
+          return { threadId, turns };
+        }
+
+        const content = fs.readFileSync(sessionPath, "utf8");
+        const lines = content.split("\n").filter((l) => l.trim().length > 0);
+        let turnIndex = 0;
+        const currentItems: Array<unknown> = [];
+        let lastAuthor: string | null = null;
+
+        for (const line of lines) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          const messages = Array.isArray(parsed.messages)
+            ? (parsed.messages as Array<Record<string, unknown>>)
+            : [];
+          for (const msg of messages) {
+            const author = typeof msg.author === "string" ? msg.author : "";
+            const mtype = typeof msg.messageType === "string" ? msg.messageType : "";
+            if (author !== lastAuthor && currentItems.length > 0) {
+              turnIndex++;
+              turns.push({
+                id: TurnId.make(`glean-history-${turnIndex}`),
+                items: [...currentItems],
+              });
+              currentItems.length = 0;
+            }
+            lastAuthor = author;
+            const fragments = Array.isArray(msg.fragments)
+              ? (msg.fragments as Array<Record<string, unknown>>)
+              : [];
+            const texts: string[] = fragments
+              .map((f) => (typeof f.text === "string" ? f.text : ""))
+              .filter((t) => t.length > 0);
+            const hasArtifact = typeof msg.artifactInfo === "object" && msg.artifactInfo !== null;
+            if (texts.length > 0 || hasArtifact) {
+              currentItems.push({ ...msg, fragments: texts.length > 0 ? fragments : undefined });
+            }
+          }
+        }
+        if (currentItems.length > 0) {
+          turnIndex++;
+          turns.push({ id: TurnId.make(`glean-history-${turnIndex}`), items: [...currentItems] });
+        }
+
+        return { threadId, turns };
       });
 
     const rollbackThread: ProviderAdapterShape<ProviderAdapterError>["rollbackThread"] = (
