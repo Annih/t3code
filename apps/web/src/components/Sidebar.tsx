@@ -2208,6 +2208,10 @@ export default function Sidebar() {
     });
   }, []);
   const clearMultiScope = useCallback(() => setMultiScopeKeys(new Set()), []);
+  const selectAllProjects = useCallback(() => {
+    setMultiScopeKeys(new Set(projectGroups.map((p) => p.projectKey)));
+    dispatchProjectScopeMenu({ type: "project-settings-opened" });
+  }, [projectGroups]);
   // When multi-scope is active, derive scopedProjectKeys from the set of
   // selected project keys. Empty set = all projects (null).
   const scopedKeys: ReadonlySet<string> | null = useMemo(() => {
@@ -3958,6 +3962,29 @@ export default function Sidebar() {
                         />
                       </div>
                     </div>
+                    {multiProjectScope ? (
+                      <div className="shrink-0 border-b border-border/70 px-3 py-1.5">
+                        <button
+                          type="button"
+                          className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 text-xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            selectAllProjects();
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <CheckIcon
+                            className={cn(
+                              "size-3.5 shrink-0",
+                              multiScopeKeys.size === projectGroups.length
+                                ? "opacity-100"
+                                : "opacity-0",
+                            )}
+                          />
+                          Select all
+                        </button>
+                      </div>
+                    ) : null}
                     <ComboboxEmpty>No matching projects.</ComboboxEmpty>
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
