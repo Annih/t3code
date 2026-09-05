@@ -1,0 +1,183 @@
+# Fork-only, on-demand Windows desktop build.
+#
+# Trimmed from release.yml: no quality gates, no relay/Clerk config, no
+# signing, no publishing — just an unsigned Windows artifact on GitHub-hosted
+# runners. Trigger it from the Actions tab (pick the branch there) or:
+#   gh workflow run build-windows-desktop.yml --ref <branch> -f target=nsis
+name: Build Windows desktop (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Artifact kind"
+        type: choice
+        default: nsis
+        options:
+          - nsis # installer .exe
+          - dir # unpacked app folder (no installer)
+      include_wsl_backend:
+        description: "Bundle the Linux node-pty prebuild so the WSL backend works"
+        type: boolean
+        default: true
+
+jobs:
+  # The packaged WSL backend runs a Linux/glibc pty.node inside WSL, so it must
+  # be built on Linux and handed to the Windows packaging job (same recipe as
+  # release.yml's build_wsl_node_pty).
+  wsl_node_pty:
+    name: Build WSL node-pty (linux-x64)
+    if: ${{ inputs.include_wsl_backend }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=t3...
+
+      - name: Build node-pty linux-x64 prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Upload node-pty linux-x64 prebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
+  build:
+    name: Build Windows x64 (${{ inputs.target }})
+    needs: [wsl_node_pty]
+    # Run even when wsl_node_pty is skipped (include_wsl_backend=false).
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/desktop...
+              - --filter=t3...
+              - --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Download WSL node-pty prebuild
+        if: ${{ inputs.include_wsl_backend }}
+        uses: actions/download-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild
+
+      # Fork identity stamping, applied at build time so the source branches
+      # stay clean for upstream PRs:
+      # - version gains "-annih.<sha>": the WSL server tree is extracted into a
+      #   per-version directory keyed on this string, so every build gets a
+      #   fresh tree instead of silently reusing one from a same-version
+      #   official install (the stale-UI trap).
+      # - "Alpha" becomes "Annih" in the installer product name, the runtime
+      #   window-title stage label, AND the IPC schema literal union, so the
+      #   desktop ↔ web IPC contract survives the branding change.
+      # The appId is deliberately left unchanged: fork and official builds
+      # replace each other instead of coexisting, which avoids two backends
+      # sharing one ~/.t3 state.
+      - name: Stamp fork version and branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(node -p "require('./apps/desktop/package.json').version")"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          build_version="${base_version}-annih.${short_sha}"
+          echo "T3CODE_DESKTOP_VERSION=$build_version" >> "$GITHUB_ENV"
+          node -e "
+            const fs = require('fs');
+            const path = 'apps/desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.productName = 'T3 Code (Annih)';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          sed -i 's/? "Nightly" : "Alpha";/? "Nightly" : "Annih";/' apps/desktop/src/app/DesktopEnvironment.ts
+          grep -q '"Annih"' apps/desktop/src/app/DesktopEnvironment.ts || { echo "stage label patch failed"; exit 1; }
+          # The IPC schema validates the stage label — it must also accept "Annih".
+          # Both the type alias (line ~172) and the Schema.Literals (line ~187) need patching.
+          sed -i 's/"Alpha" | "Dev"/"Annih" | "Alpha" | "Dev"/' packages/contracts/src/ipc.ts
+          sed -i 's/"Alpha", "Dev"/"Annih", "Alpha", "Dev"/' packages/contracts/src/ipc.ts
+          grep -q '"Annih"' packages/contracts/src/ipc.ts || { echo "IPC schema stage label patch failed"; exit 1; }
+          echo "Build version: $build_version"
+
+      # node-pty's Windows build requires the Spectre-mitigated MSVC libs,
+      # which the hosted images don't preinstall (copied from release.yml).
+      - name: Install Spectre-mitigated MSVC libs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      - name: Build desktop artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --platform win
+            --target "${{ inputs.target }}"
+            --arch x64
+            --verbose
+          )
+          if [[ "${{ inputs.include_wsl_backend }}" == "true" ]]; then
+            args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
+          fi
+          # No signing env provided: build-desktop-artifact.ts produces an
+          # unsigned artifact and disables certificate auto-discovery itself.
+          vp run dist:desktop:artifact "${args[@]}"
+
+      - name: Upload installer
+        if: ${{ inputs.target == 'nsis' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3code-windows-x64-installer
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: Upload unpacked app
+        if: ${{ inputs.target == 'dir' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3code-windows-x64-unpacked
+          path: release/win-unpacked/
+          if-no-files-found: error
