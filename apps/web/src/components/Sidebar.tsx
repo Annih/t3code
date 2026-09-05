@@ -4370,7 +4370,34 @@ export default function Sidebar() {
                               isElectron
                                 ? (event) => {
                                     event.preventDefault();
-                                    openProjectSettings(section.project);
+                                    void (async () => {
+                                      const api = readLocalApi();
+                                      if (!api) return;
+                                      const clicked = await settlePromise(() =>
+                                        api.contextMenu.show(
+                                          [
+                                            {
+                                              id: "project-settings",
+                                              label: "Project settings",
+                                            },
+                                            {
+                                              id: "new-thread",
+                                              label: `New thread in ${section.project.displayName}`,
+                                            },
+                                          ],
+                                          { x: event.clientX, y: event.clientY },
+                                        ),
+                                      );
+                                      if (clicked._tag === "Failure") return;
+                                      if (clicked.value === "project-settings") {
+                                        openProjectSettings(section.project);
+                                      } else if (clicked.value === "new-thread") {
+                                        const projectRef = section.project.memberProjectRefs[0];
+                                        if (projectRef) {
+                                          void handleNewThreadRef.current(projectRef);
+                                        }
+                                      }
+                                    })();
                                   }
                                 : undefined
                             }
