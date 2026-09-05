@@ -698,6 +698,18 @@ export const ACPRegistryIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const GleanIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="16" cy="16" r="14" fill="currentColor" opacity="0.15" />
+    <path
+      d="M10.5 22V10l6 4.5V10H20v12h-3.5v-6.5L10.5 22Z"
+      fill="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
 export const PiAgentIcon: Icon = ({ className, ...props }) => (
   <svg {...props} viewBox="0 0 800 800" className={cn("fill-none", className)}>
     <rect width="800" height="800" rx="160" fill="#000" />
