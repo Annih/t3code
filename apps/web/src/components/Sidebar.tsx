@@ -2540,38 +2540,53 @@ export default function Sidebar() {
       return next;
     });
   }, []);
+  // Inactive projects use the FULL thread set (ignoring multi-scope filter)
+  // so that deselecting a project in the picker doesn't move it to Inactive.
+  const fullGroupedActive = useMemo(() => {
+    if (!groupedModeActive) return null;
+    return groupActiveThreadsByProject(projectGroups, activeThreads);
+  }, [groupedModeActive, projectGroups, activeThreads]);
+  const fullGroupedSettled = useMemo(() => {
+    if (!groupedModeActive) return null;
+    return groupSettledThreadsByProject(projectGroups, settledThreads);
+  }, [groupedModeActive, projectGroups, settledThreads]);
   const inactiveProjects = useMemo(() => {
     if (!groupedModeActive || !showInactiveProjects) return null;
     const activeProjectKeys = new Set(
-      groupedActiveSections?.sections.map((s) => s.project.projectKey) ?? [],
-    );
-    const settledOnlyKeys = new Set(
-      groupedSettledSections?.sections.map((s) => s.project.projectKey) ?? [],
+      fullGroupedActive?.sections.map((s) => s.project.projectKey) ?? [],
     );
     return projectGroups
       .filter((project) => !activeProjectKeys.has(project.projectKey))
       .map((project) => {
-        const settledCount =
-          groupedSettledSections?.sections.find((s) => s.project.projectKey === project.projectKey)
-            ?.threads.length ?? 0;
-        return {
-          project,
-          settledCount,
-          isEmpty: settledCount === 0 && !settledOnlyKeys.has(project.projectKey),
-        };
+        const settledSection = fullGroupedSettled?.sections.find(
+          (s) => s.project.projectKey === project.projectKey,
+        );
+        const settledThreads = settledSection?.threads ?? [];
+        const settledCount = settledThreads.length;
+        return { project, settledCount, settledThreads };
       });
   }, [
+    fullGroupedActive,
+    fullGroupedSettled,
     groupedModeActive,
-    showInactiveProjects,
-    groupedActiveSections,
-    groupedSettledSections,
     projectGroups,
+    showInactiveProjects,
   ]);
   const [inactiveProjectsExpanded, setInactiveProjectsExpanded] = useLocalStorage(
     "t3code:sidebar:inactive-projects-expanded",
     false,
     Schema.Boolean,
   );
+  const [inactiveProjectExpanded, setInactiveProjectExpanded] = useState<Map<string, boolean>>(
+    new Map(),
+  );
+  const toggleInactiveProject = useCallback((projectKey: string) => {
+    setInactiveProjectExpanded((prev) => {
+      const next = new Map(prev);
+      next.set(projectKey, !(prev.get(projectKey) ?? false));
+      return next;
+    });
+  }, []);
   const toggleInactiveProjects = useCallback(
     () => setInactiveProjectsExpanded((v) => !v),
     [setInactiveProjectsExpanded],
@@ -4631,25 +4646,58 @@ export default function Sidebar() {
                     );
                     if (inactiveProjectsExpanded) {
                       for (const entry of inactiveProjects) {
-                        items.push(
-                          <li
-                            key={`inactive-project:${entry.project.projectKey}`}
-                            className="list-none flex h-9 items-center gap-2.5 px-2.5"
-                          >
-                            <ProjectFavicon
-                              environmentId={entry.project.environmentId}
-                              cwd={entry.project.workspaceRoot}
-                              projectName={entry.project.title}
-                              faviconPath={entry.project.faviconPath}
-                              className="size-4 shrink-0 opacity-40"
-                            />
-                            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
-                              {entry.project.displayName}
-                              {entry.settledCount > 0
-                                ? ` (${entry.settledCount} settled)`
-                                : " (empty)"}
-                            </span>
-                            {entry.isEmpty ? (
+                        const projectKey = entry.project.projectKey;
+                        const isExpanded = inactiveProjectExpanded.get(projectKey) ?? false;
+                        const hasSettled = entry.settledCount > 0;
+                        if (hasSettled) {
+                          items.push(
+                            <li key={`inactive-project-header:${projectKey}`} className="list-none">
+                              <button
+                                type="button"
+                                onClick={() => toggleInactiveProject(projectKey)}
+                                className="flex h-9 w-full cursor-pointer items-center gap-2.5 px-2.5 text-left"
+                              >
+                                <ProjectFavicon
+                                  environmentId={entry.project.environmentId}
+                                  cwd={entry.project.workspaceRoot}
+                                  projectName={entry.project.title}
+                                  faviconPath={entry.project.faviconPath}
+                                  className="size-4 shrink-0 opacity-40"
+                                />
+                                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
+                                  {entry.project.displayName} ({entry.settledCount} settled)
+                                </span>
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                                    isExpanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            </li>,
+                          );
+                          if (isExpanded) {
+                            for (const thread of entry.settledThreads) {
+                              items.push(renderThreadRow(thread, "group-settled"));
+                            }
+                          }
+                        } else {
+                          items.push(
+                            <li
+                              key={`inactive-project:${projectKey}`}
+                              className="list-none flex h-9 items-center gap-2.5 px-2.5"
+                            >
+                              <ProjectFavicon
+                                environmentId={entry.project.environmentId}
+                                cwd={entry.project.workspaceRoot}
+                                projectName={entry.project.title}
+                                faviconPath={entry.project.faviconPath}
+                                className="size-4 shrink-0 opacity-40"
+                              />
+                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
+                                {entry.project.displayName} (empty)
+                              </span>
                               <Button
                                 size="icon-micro"
                                 variant="ghost"
@@ -4665,9 +4713,9 @@ export default function Sidebar() {
                               >
                                 <SquarePenIcon className="size-3" />
                               </Button>
-                            ) : null}
-                          </li>,
-                        );
+                            </li>,
+                          );
+                        }
                       }
                     }
                   }
