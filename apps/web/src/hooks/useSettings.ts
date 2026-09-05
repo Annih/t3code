@@ -53,7 +53,7 @@ type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 
 const clientSettingsListeners = new Set<() => void>();
 const clientSettingsHydrationListeners = new Set<() => void>();
-let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+let clientSettingsSnapshot: ClientSettings = DEFAULT_CLIENT_SETTINGS ?? ({} as ClientSettings);
 let clientSettingsHydrated = false;
 let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsHydrationGeneration = 0;
@@ -72,7 +72,7 @@ function emitClientSettingsHydrationChange() {
 }
 
 function getClientSettingsSnapshot(): ClientSettings {
-  return clientSettingsSnapshot;
+  return clientSettingsSnapshot ?? ({} as ClientSettings);
 }
 
 function replaceClientSettingsSnapshot(settings: ClientSettings): void {
