@@ -4679,6 +4679,41 @@ export default function Sidebar() {
                               <button
                                 type="button"
                                 onClick={() => toggleInactiveProject(projectKey)}
+                                onContextMenu={
+                                  isElectron
+                                    ? (event) => {
+                                        event.preventDefault();
+                                        void (async () => {
+                                          const api = readLocalApi();
+                                          if (!api) return;
+                                          const clicked = await settlePromise(() =>
+                                            api.contextMenu.show(
+                                              [
+                                                {
+                                                  id: "project-settings",
+                                                  label: "Project settings",
+                                                },
+                                                {
+                                                  id: "new-thread",
+                                                  label: `New thread in ${entry.project.displayName}`,
+                                                },
+                                              ],
+                                              { x: event.clientX, y: event.clientY },
+                                            ),
+                                          );
+                                          if (clicked._tag === "Failure") return;
+                                          if (clicked.value === "project-settings") {
+                                            openProjectSettings(entry.project);
+                                          } else if (clicked.value === "new-thread") {
+                                            const projectRef = entry.project.memberProjectRefs[0];
+                                            if (projectRef) {
+                                              void handleNewThreadRef.current(projectRef);
+                                            }
+                                          }
+                                        })();
+                                      }
+                                    : undefined
+                                }
                                 className="flex h-9 w-full cursor-pointer items-center gap-2.5 px-2.5 text-left"
                               >
                                 <ProjectFavicon
@@ -4723,6 +4758,41 @@ export default function Sidebar() {
                             <li
                               key={`inactive-project:${projectKey}`}
                               className="list-none flex h-9 items-center gap-2.5 px-2.5"
+                              onContextMenu={
+                                isElectron
+                                  ? (event) => {
+                                      event.preventDefault();
+                                      void (async () => {
+                                        const api = readLocalApi();
+                                        if (!api) return;
+                                        const clicked = await settlePromise(() =>
+                                          api.contextMenu.show(
+                                            [
+                                              {
+                                                id: "project-settings",
+                                                label: "Project settings",
+                                              },
+                                              {
+                                                id: "new-thread",
+                                                label: `New thread in ${entry.project.displayName}`,
+                                              },
+                                            ],
+                                            { x: event.clientX, y: event.clientY },
+                                          ),
+                                        );
+                                        if (clicked._tag === "Failure") return;
+                                        if (clicked.value === "project-settings") {
+                                          openProjectSettings(entry.project);
+                                        } else if (clicked.value === "new-thread") {
+                                          const projectRef = entry.project.memberProjectRefs[0];
+                                          if (projectRef) {
+                                            void handleNewThreadRef.current(projectRef);
+                                          }
+                                        }
+                                      })();
+                                    }
+                                  : undefined
+                              }
                             >
                               <ProjectFavicon
                                 environmentId={entry.project.environmentId}
