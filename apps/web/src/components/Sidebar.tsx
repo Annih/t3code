@@ -1365,7 +1365,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
               )}
             >
-              {variant === "grouped" && driverKind ? (
+              {(variant === "grouped" || variant === "group-settled") && driverKind ? (
                 <ProviderInstanceIcon
                   driverKind={driverKind}
                   displayName={thread.session?.providerName ?? modelInstanceId}
@@ -2195,6 +2195,7 @@ export default function Sidebar() {
   // Multi-project scope: UI-only set, not persisted in contracts.
   const multiProjectScope = useSidebarMultiProjectScope();
   const [multiScopeKeys, setMultiScopeKeys] = useState<Set<string>>(new Set());
+  const multiSelectClickedRef = useRef(false);
   const toggleMultiScopeKey = useCallback((projectKey: string) => {
     setMultiScopeKeys((prev) => {
       const next = new Set(prev);
@@ -2209,7 +2210,6 @@ export default function Sidebar() {
   const clearMultiScope = useCallback(() => setMultiScopeKeys(new Set()), []);
   const selectAllProjects = useCallback(() => {
     setMultiScopeKeys(new Set(projectGroups.map((p) => p.projectKey)));
-    dispatchProjectScopeMenu({ type: "project-settings-opened" });
   }, [projectGroups]);
   // When multi-scope is active, derive scopedProjectKeys from the set of
   // selected project keys. Empty set = all projects (null).
@@ -3903,7 +3903,10 @@ export default function Sidebar() {
                   isItemEqualToValue={(a, b) => a.value === b.value}
                   open={projectScopeMenuState.open}
                   onOpenChange={(open) => {
-                    if (multiProjectScope && !open) return;
+                    if (multiProjectScope && !open && multiSelectClickedRef.current) {
+                      multiSelectClickedRef.current = false;
+                      return;
+                    }
                     dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
                   value={selectedProjectScopeItem}
@@ -4013,6 +4016,7 @@ export default function Sidebar() {
                                 ? (event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
+                                    multiSelectClickedRef.current = true;
                                     toggleMultiScopeKey(item.value);
                                   }
                                 : undefined
@@ -4504,9 +4508,21 @@ export default function Sidebar() {
                             </li>,
                           );
                           if (isExpanded) {
-                            for (const thread of visibleThreads) {
-                              items.push(renderThreadRow(thread, "group-settled"));
-                            }
+                            items.push(
+                              <li
+                                key={`project-group-settled-tree:${projectKey}`}
+                                className={cn(
+                                  "list-none",
+                                  isElectron && "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                                )}
+                              >
+                                <ul role="list" className="flex flex-col gap-px">
+                                  {visibleThreads.map((thread) =>
+                                    renderThreadRow(thread, "group-settled"),
+                                  )}
+                                </ul>
+                              </li>,
+                            );
                             if (hiddenCount > 0) {
                               items.push(
                                 <li
@@ -4646,6 +4662,14 @@ export default function Sidebar() {
                     );
                     if (inactiveProjectsExpanded) {
                       for (const entry of inactiveProjects) {
+                        // Exclude projects filtered out by the multi-scope selector.
+                        if (
+                          scopedKeys !== null &&
+                          !entry.project.memberProjectRefs.some((ref) =>
+                            scopedKeys.has(`${ref.environmentId}:${ref.projectId}`),
+                          )
+                        )
+                          continue;
                         const projectKey = entry.project.projectKey;
                         const isExpanded = inactiveProjectExpanded.get(projectKey) ?? false;
                         const hasSettled = entry.settledCount > 0;
@@ -4678,9 +4702,21 @@ export default function Sidebar() {
                             </li>,
                           );
                           if (isExpanded) {
-                            for (const thread of entry.settledThreads) {
-                              items.push(renderThreadRow(thread, "group-settled"));
-                            }
+                            items.push(
+                              <li
+                                key={`inactive-project-settled-tree:${projectKey}`}
+                                className={cn(
+                                  "list-none",
+                                  isElectron && "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                                )}
+                              >
+                                <ul role="list" className="flex flex-col gap-px">
+                                  {entry.settledThreads.map((thread) =>
+                                    renderThreadRow(thread, "group-settled"),
+                                  )}
+                                </ul>
+                              </li>,
+                            );
                           }
                         } else {
                           items.push(
