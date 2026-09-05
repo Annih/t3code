@@ -32,6 +32,12 @@ const PROVIDER = ProviderDriverKind.make("glean");
 interface GleanSessionState {
   chatId: string | null;
   abortController: AbortController | null;
+  pendingArtifactInfo: {
+    id: string;
+    version: number;
+    trackingToken: string;
+    questions: Array<{ question: string; ids: string[] }>;
+  } | null;
 }
 
 export interface GleanAdapterOptions {
@@ -143,7 +149,11 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
           return existingSession;
         }
 
-        sessions.set(input.threadId, { chatId: null, abortController: null });
+        sessions.set(input.threadId, {
+          chatId: null,
+          abortController: null,
+          pendingArtifactInfo: null,
+        });
 
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
@@ -301,6 +311,28 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                 }
               }
               if (allQuestions.length > 0 && requestId) {
+                const artifactId =
+                  typeof msg.artifactInfo === "object" && msg.artifactInfo !== null
+                    ? ((msg.artifactInfo as Record<string, unknown>).id as string | undefined)
+                    : undefined;
+                const artifactVersion =
+                  typeof msg.artifactInfo === "object" && msg.artifactInfo !== null
+                    ? ((msg.artifactInfo as Record<string, unknown>).version as number | undefined)
+                    : undefined;
+                const artifactTrackingToken =
+                  typeof msg.artifactInfo === "object" && msg.artifactInfo !== null
+                    ? ((msg.artifactInfo as Record<string, unknown>).trackingToken as
+                        | string
+                        | undefined)
+                    : undefined;
+                if (artifactId && artifactVersion && artifactTrackingToken) {
+                  state.pendingArtifactInfo = {
+                    id: artifactId,
+                    version: artifactVersion,
+                    trackingToken: artifactTrackingToken,
+                    questions: allQuestions.map((q) => ({ question: q.question, ids: [q.id] })),
+                  };
+                }
                 yield* emit({
                   ...(yield* buildEventBase({
                     threadId: input.threadId,
@@ -402,26 +434,53 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
     ) =>
       Effect.gen(function* () {
         const state = sessions.get(threadId);
-        if (!state) return;
+        if (!state || !state.pendingArtifactInfo) return;
 
-        const lines: Array<string> = [];
-        for (const [questionId, answer] of Object.entries(answers)) {
-          const shortQuestion = String(questionId)
-            .replace(/^glean-q-/, "")
-            .substring(0, 60);
-          const answerText = Array.isArray(answer) ? answer.join(", ") : String(answer);
-          if (answerText.trim().length === 0) continue;
-          lines.push(`${shortQuestion}: ${answerText.trim()}`);
+        const artifact = state.pendingArtifactInfo;
+        state.pendingArtifactInfo = null;
+
+        const responses: Array<{ question: string; answers: string[] }> = [];
+        for (const q of artifact.questions) {
+          const answer = answers[q.ids[0] ?? ""];
+          const answerText =
+            typeof answer === "string"
+              ? [answer]
+              : Array.isArray(answer)
+                ? (answer as string[])
+                : [];
+          if (answerText.length > 0) {
+            responses.push({ question: q.question, answers: answerText });
+          }
         }
+        if (responses.length === 0) return;
 
-        if (lines.length === 0) return;
+        const jsonBody = {
+          messages: [
+            {
+              author: "USER",
+              messageType: "CONTENT",
+              fragments: [{ text: "Answering Glean clarification questions" }],
+              artifactInfo: {
+                id: artifact.id,
+                version: artifact.version,
+                trackingToken: artifact.trackingToken,
+                action: {
+                  clarifyingQuestionResponses: { responses },
+                },
+              },
+            },
+          ],
+          saveChat: true,
+          stream: true,
+          chatId: state.chatId ?? undefined,
+          agentConfig: { agent: "AUTO", mode: "DEFAULT" },
+        };
 
-        const responseText = lines.join("\n");
-        const args = state.chatId
-          ? ["chat", "--save", "--resume", state.chatId, responseText]
-          : ["chat", "--save", responseText];
+        const jsonString = JSON.stringify(jsonBody);
+        const responseExit = yield* Effect.exit(
+          runGleanCli(["chat", "--json", jsonString, "dummy"]),
+        );
 
-        const responseExit = yield* Effect.exit(runGleanCli(args));
         if (responseExit._tag === "Success") {
           const { stdout } = responseExit.value;
           if (stdout.length > 0) {
