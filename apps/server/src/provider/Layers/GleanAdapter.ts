@@ -280,6 +280,35 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
             if (msg.messageType === "ARTIFACT_PAPER" || msg.messageType === "ARTIFACT_MESSAGE") {
               const info = msg.artifactInfo as Record<string, unknown> | undefined;
               const artifactId = typeof info?.id === "string" ? info.id : "unknown";
+              const artifactFragments = Array.isArray(msg.fragments)
+                ? (msg.fragments as Array<Record<string, unknown>>)
+                : [];
+              let artifactName: string | undefined;
+              let artifactContent: string | undefined;
+              for (const frag of artifactFragments) {
+                const artifact = frag.artifact as Record<string, unknown> | undefined;
+                if (typeof artifact?.name === "string" && !artifactName) {
+                  artifactName = artifact.name;
+                }
+                if (typeof artifact?.resolvedContent === "string" && !artifactContent) {
+                  artifactContent = artifact.resolvedContent;
+                }
+              }
+              if (artifactContent && artifactContent.length > 0) {
+                const header = artifactName ? `**${artifactName}**\n\n` : "";
+                yield* emit({
+                  ...(yield* buildEventBase({
+                    threadId: input.threadId,
+                    turnId,
+                    itemId: `glean-artifact-${artifactId}`,
+                  })),
+                  type: "content.delta",
+                  payload: {
+                    streamKind: "assistant_text",
+                    delta: `\n${header}${artifactContent}\n`,
+                  },
+                });
+              }
               yield* emit({
                 ...(yield* buildEventBase({
                   threadId: input.threadId,
@@ -290,7 +319,9 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                 payload: {
                   itemType: "artifact_reference",
                   status: "completed",
-                  title: msg.messageType === "ARTIFACT_PAPER" ? "Glean Canvas" : "Glean Artifact",
+                  title:
+                    artifactName ??
+                    (msg.messageType === "ARTIFACT_PAPER" ? "Glean Canvas" : "Glean Artifact"),
                   data: msg.artifactInfo ?? {},
                 },
               });
