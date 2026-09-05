@@ -2143,38 +2143,6 @@ export function GeneralSettingsPanel() {
 
         {settings.sidebarGroupThreadsByProject ? (
           <SettingsRow
-            {...searchableSetting("settled-threads-placement")}
-            description="Where settled threads appear when the sidebar is grouped by project."
-            control={
-              <Select
-                value={settings.sidebarSettledPlacement}
-                onValueChange={(value) =>
-                  updateSettings({
-                    sidebarSettledPlacement: value as "global" | "in-projects" | "both",
-                  })
-                }
-              >
-                <SelectTrigger aria-label="Settled thread placement">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="global">
-                    Global shelf
-                  </SelectItem>
-                  <SelectItem hideIndicator value="in-projects">
-                    Inside projects
-                  </SelectItem>
-                  <SelectItem hideIndicator value="both">
-                    Both
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-            }
-          />
-        ) : null}
-
-        {settings.sidebarGroupThreadsByProject ? (
-          <SettingsRow
             {...searchableSetting("multi-project-scope")}
             description="Select multiple projects in the sidebar scope picker to see only their threads."
             control={

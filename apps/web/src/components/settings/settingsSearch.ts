@@ -156,12 +156,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
-    id: "settled-threads-placement",
-    title: "Settled threads placement",
-    to: "/settings/general",
-    searchTerms: ["where settled appear inside projects globally"],
-  },
-  {
     id: "multi-project-scope",
     title: "Multi-project scope",
     to: "/settings/general",

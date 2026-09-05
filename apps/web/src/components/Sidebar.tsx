@@ -116,7 +116,6 @@ import {
   useClientSettings,
   useSidebarGroupThreadsByProject,
   useSidebarMultiProjectScope,
-  useSidebarSettledPlacement,
   useSidebarShowInactiveProjects,
 } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
@@ -2229,7 +2228,6 @@ export default function Sidebar() {
   // Grouped mode only applies to the unscoped list: scoped to one project,
   // a per-project header over every row would restate the scope picker.
   const groupThreadsByProject = useSidebarGroupThreadsByProject();
-  const settledPlacement = useSidebarSettledPlacement();
   const showInactiveProjects = useSidebarShowInactiveProjects();
   const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
@@ -2446,9 +2444,9 @@ export default function Sidebar() {
     [setSettledShelfExpanded],
   );
   const renderedSettledThreads = useMemo(() => {
-    // When settled threads live inside their project sections, the global
-    // shelf is suppressed — no rendered rows for the flat ordered list.
-    if (settledPlacement === "in-projects") return [];
+    // When grouped mode is active, settled threads live inside their
+    // project sections — no global shelf needed.
+    if (groupedModeActive) return [];
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return [];
     const routeThread = visibleSettledThreads.find(
@@ -2514,8 +2512,7 @@ export default function Sidebar() {
       ungrouped,
     };
   }, [activeThreads, groupedModeActive, projectExpandedById, projectGroups, routeThreadKey]);
-  const settleInProjects =
-    groupedModeActive && (settledPlacement === "in-projects" || settledPlacement === "both");
+  const settleInProjects = groupedModeActive;
   const groupedSettledSections = useMemo(() => {
     if (!settleInProjects) return null;
     const { sections, ungrouped } = groupSettledThreadsByProject(projectGroups, settledThreads);
@@ -4566,9 +4563,7 @@ export default function Sidebar() {
                       items.push(renderThreadRow(thread, "snoozed"));
                     }
                   }
-                  const showGlobalSettled =
-                    settledPlacement === "global" || settledPlacement === "both";
-                  if (showGlobalSettled && settledThreads.length > 0) {
+                  if (!groupedModeActive && settledThreads.length > 0) {
                     items.push(
                       <li
                         key="settled-shelf-header"
@@ -4599,7 +4594,7 @@ export default function Sidebar() {
                       </li>,
                     );
                   }
-                  if (showGlobalSettled) {
+                  if (!groupedModeActive) {
                     for (const thread of renderedSettledThreads) {
                       items.push(renderThreadRow(thread, "settled"));
                     }
@@ -4678,9 +4673,7 @@ export default function Sidebar() {
                   }
                   return items;
                 })()}
-                {(settledPlacement === "global" || settledPlacement === "both") &&
-                settledShelfExpanded &&
-                hiddenSettledCount > 0 ? (
+                {!groupedModeActive && settledShelfExpanded && hiddenSettledCount > 0 ? (
                   <li className="list-none">
                     <button
                       type="button"

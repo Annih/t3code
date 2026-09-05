@@ -360,17 +360,6 @@ export function useSidebarGroupThreadsByProject(): boolean {
   return settingsHydrated && groupThreadsByProject;
 }
 
-/**
- * Where settled threads appear in the grouped sidebar. Gated on hydration
- * for the same reason as `useSidebarGroupThreadsByProject`.
- */
-export function useSidebarSettledPlacement(): "global" | "in-projects" | "both" {
-  const settingsHydrated = useClientSettingsHydrated();
-  const placement = useClientSettingsValue().sidebarSettledPlacement;
-  if (!settingsHydrated) return "global";
-  return placement === "in-projects" || placement === "both" ? placement : "global";
-}
-
 export function useSidebarMultiProjectScope(): boolean {
   const settingsHydrated = useClientSettingsHydrated();
   if (!settingsHydrated) return false;
