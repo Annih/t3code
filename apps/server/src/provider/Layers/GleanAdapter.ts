@@ -280,22 +280,6 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
             if (msg.messageType === "ARTIFACT_PAPER" || msg.messageType === "ARTIFACT_MESSAGE") {
               const info = msg.artifactInfo as Record<string, unknown> | undefined;
               const artifactId = typeof info?.id === "string" ? info.id : "unknown";
-              const serverUrl = config.serverUrl.trim().replace(/\/$/, "");
-              const artifactUrl = `${serverUrl}/library/${artifactId}`;
-              const label =
-                msg.messageType === "ARTIFACT_PAPER" ? "Glean Canvas" : "Glean Artifact";
-              yield* emit({
-                ...(yield* buildEventBase({
-                  threadId: input.threadId,
-                  turnId,
-                  itemId: `glean-artifact-${artifactId}`,
-                })),
-                type: "content.delta",
-                payload: {
-                  streamKind: "assistant_text",
-                  delta: `\n[${label}](${artifactUrl})\n`,
-                },
-              });
               yield* emit({
                 ...(yield* buildEventBase({
                   threadId: input.threadId,
@@ -306,8 +290,7 @@ export function makeGleanAdapter(config: GleanSettings, options?: GleanAdapterOp
                 payload: {
                   itemType: "artifact_reference",
                   status: "completed",
-                  title: label,
-                  detail: artifactUrl,
+                  title: msg.messageType === "ARTIFACT_PAPER" ? "Glean Canvas" : "Glean Artifact",
                   data: msg.artifactInfo ?? {},
                 },
               });
