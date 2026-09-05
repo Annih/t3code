@@ -2189,6 +2189,22 @@ export function GeneralSettingsPanel() {
           />
         ) : null}
 
+        {settings.sidebarGroupThreadsByProject ? (
+          <SettingsRow
+            {...searchableSetting("show-inactive-projects")}
+            description="Show projects with no active threads in a collapsible section at the bottom of the sidebar."
+            control={
+              <Switch
+                checked={settings.sidebarShowInactiveProjects}
+                onCheckedChange={(checked) =>
+                  updateSettings({ sidebarShowInactiveProjects: Boolean(checked) })
+                }
+                aria-label="Show inactive projects"
+              />
+            }
+          />
+        ) : null}
+
         {supportsAutoSettlement ? (
           <>
             <SettingsRow

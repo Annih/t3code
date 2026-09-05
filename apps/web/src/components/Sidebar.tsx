@@ -117,6 +117,7 @@ import {
   useSidebarGroupThreadsByProject,
   useSidebarMultiProjectScope,
   useSidebarSettledPlacement,
+  useSidebarShowInactiveProjects,
 } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -2225,6 +2226,7 @@ export default function Sidebar() {
   // a per-project header over every row would restate the scope picker.
   const groupThreadsByProject = useSidebarGroupThreadsByProject();
   const settledPlacement = useSidebarSettledPlacement();
+  const showInactiveProjects = useSidebarShowInactiveProjects();
   const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
@@ -2537,6 +2539,42 @@ export default function Sidebar() {
       return next;
     });
   }, []);
+  const inactiveProjects = useMemo(() => {
+    if (!groupedModeActive || !showInactiveProjects) return null;
+    const activeProjectKeys = new Set(
+      groupedActiveSections?.sections.map((s) => s.project.projectKey) ?? [],
+    );
+    const settledOnlyKeys = new Set(
+      groupedSettledSections?.sections.map((s) => s.project.projectKey) ?? [],
+    );
+    return projectGroups
+      .filter((project) => !activeProjectKeys.has(project.projectKey))
+      .map((project) => {
+        const settledCount =
+          groupedSettledSections?.sections.find((s) => s.project.projectKey === project.projectKey)
+            ?.threads.length ?? 0;
+        return {
+          project,
+          settledCount,
+          isEmpty: settledCount === 0 && !settledOnlyKeys.has(project.projectKey),
+        };
+      });
+  }, [
+    groupedModeActive,
+    showInactiveProjects,
+    groupedActiveSections,
+    groupedSettledSections,
+    projectGroups,
+  ]);
+  const [inactiveProjectsExpanded, setInactiveProjectsExpanded] = useLocalStorage(
+    "t3code:sidebar:inactive-projects-expanded",
+    false,
+    Schema.Boolean,
+  );
+  const toggleInactiveProjects = useCallback(
+    () => setInactiveProjectsExpanded((v) => !v),
+    [setInactiveProjectsExpanded],
+  );
   const toggleProjectGroupExpanded = useCallback(
     (project: SidebarProjectSnapshot, expanded: boolean) => {
       setProjectExpanded(projectExpansionPreferenceKeys(project), !expanded);
@@ -4503,6 +4541,78 @@ export default function Sidebar() {
                   if (showGlobalSettled) {
                     for (const thread of renderedSettledThreads) {
                       items.push(renderThreadRow(thread, "settled"));
+                    }
+                  }
+                  if (inactiveProjects !== null && inactiveProjects.length > 0) {
+                    items.push(
+                      <li
+                        key="inactive-projects-header"
+                        data-thread-selection-safe
+                        className="list-none"
+                      >
+                        <button
+                          type="button"
+                          onClick={toggleInactiveProjects}
+                          aria-expanded={inactiveProjectsExpanded}
+                          data-testid="sidebar-inactive-projects-toggle"
+                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                        >
+                          <span className="text-xs font-medium text-muted-foreground/50">
+                            {inactiveProjectsExpanded
+                              ? "Inactive projects"
+                              : `Inactive projects (${inactiveProjects.length})`}
+                          </span>
+                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                          <ChevronDownIcon
+                            aria-hidden
+                            className={cn(
+                              "size-3 text-muted-foreground/50 transition-transform",
+                              inactiveProjectsExpanded && "rotate-180",
+                            )}
+                          />
+                        </button>
+                      </li>,
+                    );
+                    if (inactiveProjectsExpanded) {
+                      for (const entry of inactiveProjects) {
+                        items.push(
+                          <li
+                            key={`inactive-project:${entry.project.projectKey}`}
+                            className="list-none flex h-9 items-center gap-2.5 px-2.5"
+                          >
+                            <ProjectFavicon
+                              environmentId={entry.project.environmentId}
+                              cwd={entry.project.workspaceRoot}
+                              projectName={entry.project.title}
+                              faviconPath={entry.project.faviconPath}
+                              className="size-4 shrink-0 opacity-40"
+                            />
+                            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
+                              {entry.project.displayName}
+                              {entry.settledCount > 0
+                                ? ` (${entry.settledCount} settled)`
+                                : " (empty)"}
+                            </span>
+                            {entry.isEmpty ? (
+                              <Button
+                                size="icon-micro"
+                                variant="ghost"
+                                aria-label={`New thread in ${entry.project.displayName}`}
+                                title={`New thread in ${entry.project.displayName}`}
+                                className="ml-auto shrink-0 size-6 text-muted-foreground/40 hover:text-foreground cursor-pointer"
+                                onClick={() => {
+                                  const projectRef = entry.project.memberProjectRefs[0];
+                                  if (projectRef) {
+                                    void handleNewThreadRef.current(projectRef);
+                                  }
+                                }}
+                              >
+                                <SquarePenIcon className="size-3" />
+                              </Button>
+                            ) : null}
+                          </li>,
+                        );
+                      }
                     }
                   }
                   return items;

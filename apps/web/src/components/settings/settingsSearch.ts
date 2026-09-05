@@ -168,6 +168,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["select multiple projects filter picker"],
   },
   {
+    id: "show-inactive-projects",
+    title: "Show inactive projects",
+    to: "/settings/general",
+    searchTerms: ["projects no active threads empty settled only"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

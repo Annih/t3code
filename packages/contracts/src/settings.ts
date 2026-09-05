@@ -355,6 +355,11 @@ export const ClientSettingsSchema = Schema.Struct({
   // When enabled, the project scope picker becomes a multi-select checklist
   // instead of a single-select combobox. Selecting none = All projects.
   sidebarMultiProjectScope: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Show projects with no active threads (settled-only or fully empty) in a
+  // collapsible "Inactive projects" shelf below the grouped project sections.
+  sidebarShowInactiveProjects: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1230,6 +1235,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarGroupThreadsByProject: Schema.optionalKey(Schema.Boolean),
   sidebarSettledPlacement: Schema.optionalKey(SidebarSettledPlacement),
   sidebarMultiProjectScope: Schema.optionalKey(Schema.Boolean),
+  sidebarShowInactiveProjects: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

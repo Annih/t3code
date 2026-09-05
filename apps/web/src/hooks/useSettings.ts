@@ -377,6 +377,12 @@ export function useSidebarMultiProjectScope(): boolean {
   return useClientSettingsValue().sidebarMultiProjectScope === true;
 }
 
+export function useSidebarShowInactiveProjects(): boolean {
+  const settingsHydrated = useClientSettingsHydrated();
+  if (!settingsHydrated) return false;
+  return useClientSettingsValue().sidebarShowInactiveProjects === true;
+}
+
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,
