@@ -11,6 +11,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./orchestration.ts";
+import { SourceControlProviderKind } from "./sourceControl.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
   DEFAULT_PREVIEW_APPEARANCE,
@@ -966,6 +967,21 @@ export const ServerSettings = Schema.Struct({
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * Per-provider enabled flags for source control hosts. When false, the
+   * provider is skipped during discovery, change request listing, and every
+   * other operation — as if it were never registered.
+   */
+  sourceControlProviders: Schema.Record(
+    SourceControlProviderKind,
+    Schema.Struct({
+      enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+    }),
+  ).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({} as Record<SourceControlProviderKind, { enabled: boolean }>),
+    ),
+  ),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -1189,6 +1205,12 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  sourceControlProviders: Schema.optionalKey(
+    Schema.Record(
+      SourceControlProviderKind,
+      Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) }),
+    ),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

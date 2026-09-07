@@ -1,7 +1,7 @@
 import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
   SourceControlProviderKind,
@@ -257,19 +257,24 @@ function itemSummary({
 function DiscoveryItemRow({
   item,
   children,
+  settingsEnabled,
+  onToggleEnabled,
 }: {
   readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
   readonly children?: ReactNode;
+  readonly settingsEnabled?: boolean;
+  readonly onToggleEnabled?: () => void;
 }) {
   const version = optionLabel(item.version);
-  const enabled = isProviderDiscoveryItem(item)
-    ? item.status === "available" && item.auth.status === "authenticated"
+  const providerEnabled = isProviderDiscoveryItem(item)
+    ? (settingsEnabled ?? (item.status === "available" && item.auth.status === "authenticated"))
     : item.status === "available" && item.implemented;
   const auth = isProviderDiscoveryItem(item) ? item.auth : null;
   const authStatus = auth ? authPresentation(auth) : null;
   const authAccount = auth ? optionLabel(auth.account) : null;
   const [isExpanded, setIsExpanded] = useState(false);
   const hasDetails = children !== undefined;
+  const isProvider = isProviderDiscoveryItem(item);
   const searchTargetId = useSettingsSearchTargetId();
 
   useEffect(() => {
@@ -323,8 +328,18 @@ function DiscoveryItemRow({
                 />
               </Button>
             ) : null}
+            {!isVcsNotReady(item) && isProvider ? (
+              <PolicyTooltip>
+                {`When off, ${item.label} change requests are hidden and the ${item.label} CLI is never invoked.`}
+              </PolicyTooltip>
+            ) : null}
             {!isVcsNotReady(item) ? (
-              <Switch checked={enabled} disabled aria-label={`${item.label} availability`} />
+              <Switch
+                checked={providerEnabled}
+                disabled={!isProvider || onToggleEnabled === undefined}
+                onCheckedChange={() => onToggleEnabled?.()}
+                aria-label={`${item.label} ${isProvider ? "toggle" : "availability"}`}
+              />
             ) : null}
           </div>
         </div>
@@ -499,6 +514,8 @@ function EmptySourceControlDiscovery({
 export function SourceControlSettingsPanel() {
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
   const fallbackEnvironment =
     environments.find((environment) => environment.connection.phase === "connected") ??
     environments[0] ??
@@ -521,6 +538,20 @@ export function SourceControlSettingsPanel() {
   const handleScan = () => {
     discovery.refresh();
   };
+
+  const handleToggleProvider = useCallback(
+    (kind: SourceControlProviderKind) => {
+      const currentEnabled = settings.sourceControlProviders[kind]?.enabled !== false;
+      updateSettings({
+        sourceControlProviders: {
+          ...settings.sourceControlProviders,
+          [kind]: { enabled: !currentEnabled },
+        },
+      });
+    },
+    [settings.sourceControlProviders, updateSettings],
+  );
+
   const scanButton = (
     <Tooltip>
       <TooltipTrigger
@@ -573,7 +604,12 @@ export function SourceControlSettingsPanel() {
               headerAction={hasVersionControlSystems ? null : scanButton}
             >
               {result.sourceControlProviders.map((item) => (
-                <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
+                <DiscoveryItemRow
+                  key={`provider:${item.kind}`}
+                  item={item}
+                  settingsEnabled={settings.sourceControlProviders[item.kind]?.enabled !== false}
+                  onToggleEnabled={() => handleToggleProvider(item.kind)}
+                />
               ))}
             </SettingsSection>
           ) : null}
