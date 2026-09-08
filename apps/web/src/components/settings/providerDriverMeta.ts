@@ -3,6 +3,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  GleanSettings,
   GrokSettings,
   OpenCodeSettings,
   ProviderDriverKind,
@@ -12,6 +13,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  GleanIcon,
   GrokIcon,
   type Icon,
   OpenAI,
@@ -81,6 +83,13 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Antigravity",
     icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("glean"),
+    label: "Glean",
+    icon: GleanIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: GleanSettings,
   },
 ];
 

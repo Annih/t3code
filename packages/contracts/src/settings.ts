@@ -698,6 +698,71 @@ export const AntigravitySettings = makeProviderSettingsSchema(
 );
 export type AntigravitySettings = typeof AntigravitySettings.Type;
 
+export const GleanSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    serverUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Glean instance URL",
+        description: "Glean instance URL",
+        providerSettingsForm: {
+          placeholder: "https://<company>-be.glean.com",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    authType: Schema.Literals(["oauth", "api_key"]).pipe(
+      Schema.withDecodingDefault(Effect.succeed("oauth" as const)),
+      Schema.annotateKey({
+        title: "Authentication type",
+        description: "Glean authentication type",
+        providerSettingsForm: {
+          control: "select",
+          options: [
+            { value: "oauth", label: "OAuth 2.0" },
+            { value: "api_key", label: "API token" },
+          ],
+        },
+      }),
+    ),
+    apiToken: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "API token",
+        description: "Glean API token (stored in plain text on disk)",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Optional",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    binaryPath: makeBinaryPathSetting("glean").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description:
+          "Path to the glean CLI binary. Optional - used for auth flow and text generation.",
+        providerSettingsForm: {
+          placeholder: "glean",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["serverUrl", "authType", "apiToken", "binaryPath"],
+  },
+);
+export type GleanSettings = typeof GleanSettings.Type;
+
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
     // Off by default (like Cursor and Grok): the binding is not yet stable
@@ -919,6 +984,17 @@ export const ServerSettings = Schema.Struct({
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * Per-provider enabled flags for source control hosts. When false, the
+   * provider is skipped during discovery, change request listing, and every
+   * other operation — as if it were never registered.
+   */
+  sourceControlProviders: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -933,6 +1009,7 @@ export const ServerSettings = Schema.Struct({
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     antigravity: AntigravitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    glean: GleanSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -1101,6 +1178,15 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const GleanSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  serverUrl: Schema.optionalKey(TrimmedString),
+  authType: Schema.optionalKey(Schema.Literals(["oauth", "api_key"])),
+  apiToken: Schema.optionalKey(TrimmedString),
+  binaryPath: Schema.optionalKey(TrimmedString),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
@@ -1132,6 +1218,9 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  sourceControlProviders: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
@@ -1146,6 +1235,7 @@ export const ServerSettingsPatch = Schema.Struct({
       grok: Schema.optionalKey(GrokSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       antigravity: Schema.optionalKey(AntigravitySettingsPatch),
+      glean: Schema.optionalKey(GleanSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual

@@ -22,6 +22,7 @@ import {
   type SourceControlProviderDiscoverySpec,
 } from "./SourceControlProviderDiscovery.ts";
 import { ServerConfig } from "../config.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 
@@ -199,11 +200,18 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
     const config = yield* ServerConfig;
     const process = yield* VcsProcess.VcsProcess;
     const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
+    const serverSettingsSvc = yield* ServerSettingsService.ServerSettingsService;
+    const settings = yield* serverSettingsSvc.getSettings;
     const providers = new Map<
       SourceControlProviderKind,
       SourceControlProvider.SourceControlProvider["Service"]
     >(registrations.map((registration) => [registration.kind, registration.provider]));
     const discoverySpecs = registrations.map((registration) => registration.discovery);
+
+    const isProviderEnabled = (kind: SourceControlProviderKind): boolean => {
+      const config = settings.sourceControlProviders[kind];
+      return config?.enabled !== false;
+    };
 
     const get: SourceControlProviderRegistry["Service"]["get"] = (kind) =>
       Effect.succeed(providers.get(kind) ?? unsupportedProvider(kind));
@@ -266,7 +274,9 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       ).pipe(
         Effect.map((context) => {
           const kind = context?.provider.kind ?? "unknown";
-          const provider = providers.get(kind) ?? unsupportedProvider(kind);
+          const provider = isProviderEnabled(kind)
+            ? (providers.get(kind) ?? unsupportedProvider(kind))
+            : unsupportedProvider(kind);
           return {
             provider: bindProviderContext(provider, context),
             context,
@@ -275,7 +285,12 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
       );
 
     return SourceControlProviderRegistry.of({
-      get,
+      get: (kind) =>
+        Effect.succeed(
+          isProviderEnabled(kind)
+            ? (providers.get(kind) ?? unsupportedProvider(kind))
+            : unsupportedProvider(kind),
+        ),
       resolveHandle,
       resolve: (input) => resolveHandle(input).pipe(Effect.map((handle) => handle.provider)),
       discover: Effect.all(
@@ -293,33 +308,51 @@ export const makeWithProviders = Effect.fn("makeSourceControlProviderRegistryWit
 );
 
 export const make = Effect.gen(function* () {
-  const github = yield* GitHubSourceControlProvider.make;
-  const gitlab = yield* GitLabSourceControlProvider.make;
-  const bitbucket = yield* BitbucketSourceControlProvider.make;
-  const bitbucketDiscovery = yield* BitbucketSourceControlProvider.makeDiscovery;
-  const azureDevOps = yield* AzureDevOpsSourceControlProvider.make;
-  return yield* makeWithProviders([
-    {
+  const settings = yield* Effect.flatMap(
+    ServerSettingsService.ServerSettingsService,
+    (svc) => svc.getSettings,
+  );
+
+  const providers: Array<SourceControlProviderRegistration> = [];
+
+  if (settings.sourceControlProviders["github"]?.enabled !== false) {
+    const github = yield* GitHubSourceControlProvider.make;
+    providers.push({
       kind: "github",
       provider: github,
       discovery: GitHubSourceControlProvider.discovery,
-    },
-    {
+    });
+  }
+
+  if (settings.sourceControlProviders["gitlab"]?.enabled !== false) {
+    const gitlab = yield* GitLabSourceControlProvider.make;
+    providers.push({
       kind: "gitlab",
       provider: gitlab,
       discovery: GitLabSourceControlProvider.discovery,
-    },
-    {
+    });
+  }
+
+  if (settings.sourceControlProviders["azure-devops"]?.enabled !== false) {
+    const azureDevOps = yield* AzureDevOpsSourceControlProvider.make;
+    providers.push({
       kind: "azure-devops",
       provider: azureDevOps,
       discovery: AzureDevOpsSourceControlProvider.discovery,
-    },
-    {
+    });
+  }
+
+  if (settings.sourceControlProviders["bitbucket"]?.enabled !== false) {
+    const bitbucket = yield* BitbucketSourceControlProvider.make;
+    const bitbucketDiscovery = yield* BitbucketSourceControlProvider.makeDiscovery;
+    providers.push({
       kind: "bitbucket",
       provider: bitbucket,
       discovery: bitbucketDiscovery,
-    },
-  ]);
+    });
+  }
+
+  return yield* makeWithProviders(providers);
 });
 
 export const layer = Layer.effect(SourceControlProviderRegistry, make);
