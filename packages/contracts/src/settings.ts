@@ -1162,6 +1162,17 @@ export const ServerSettings = Schema.Struct({
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * Per-provider enabled flags for source control hosts. When false, the
+   * provider is skipped during discovery, change request listing, and every
+   * other operation — as if it were never registered.
+   */
+  sourceControlProviders: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -1409,6 +1420,9 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
+  sourceControlProviders: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.Struct({ enabled: Schema.optionalKey(Schema.Boolean) })),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),

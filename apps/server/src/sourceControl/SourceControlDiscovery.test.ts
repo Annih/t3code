@@ -12,6 +12,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable
 import { VcsProcessSpawnError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
@@ -42,6 +43,7 @@ const sourceControlProviderRegistryTestLayer = (input: {
         Layer.mock(ForgejoCli.ForgejoCli)({ listLogins: () => Effect.succeed([]) }),
         Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
         Layer.mock(VcsProcess.VcsProcess)(input.process),
+        ServerSettings.ServerSettingsService.layerTest(),
       ),
     ),
   );
