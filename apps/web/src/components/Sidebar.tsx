@@ -32,7 +32,6 @@ import {
 import {
   resolveEnvironmentMachineKind,
   type EnvironmentMachineKind,
-  type ProjectIconOverride,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -75,7 +74,6 @@ import {
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
-import { useRightPanelStore } from "../rightPanelStore";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -100,17 +98,19 @@ import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
-import {
-  isSameSidebarThreadRef,
-  useSidebarPendingFileDropStore,
-} from "../sidebarPendingFileDropStore";
+import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import {
   buildSidebarProjectSnapshots,
+  projectExpansionPreferenceKeys,
   projectGroupsSpanEnvironments,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
-import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
+import {
+  legacyProjectCwdPreferenceKey,
+  resolveProjectExpanded,
+  useUiStateStore,
+} from "../uiStateStore";
 import {
   getThreadKeysToDeselectAfterDelete,
   useThreadSelectionStore,
@@ -119,7 +119,12 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useSidebarGroupThreadsByProject,
+  useSidebarMultiProjectScope,
+  useSidebarShowInactiveProjects,
+} from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -157,6 +162,8 @@ import {
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
+  groupActiveThreadsByProject,
+  groupSettledThreadsByProject,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -194,11 +201,9 @@ import {
 import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
-  ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
   ThreadWorktreeIndicator,
   prStatusIndicator,
-  resolveThreadPullRequestBadge,
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
   useLinkedThreadPullRequest,
@@ -308,6 +313,22 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 function terminalProcessLabel(count: number): string {
   return `${count} terminal ${count === 1 ? "process" : "processes"} running`;
+}
+
+// Hover-only PR state colors for settled rows; upstream centralized the base
+// tones in pullRequestIcons but the sidebar's group-hover variant is local.
+function settledPrHoverColorClass(state: "open" | "closed" | "merged", isDraft = false): string {
+  switch (state) {
+    case "open":
+      if (isDraft) {
+        return "group-hover/sidebar-row:text-zinc-500 dark:group-hover/sidebar-row:text-zinc-400/80";
+      }
+      return "group-hover/sidebar-row:text-emerald-600 dark:group-hover/sidebar-row:text-emerald-300/90";
+    case "merged":
+      return "group-hover/sidebar-row:text-violet-600 dark:group-hover/sidebar-row:text-violet-300/90";
+    case "closed":
+      return "group-hover/sidebar-row:text-red-600 dark:group-hover/sidebar-row:text-red-300/90";
+  }
 }
 
 function SidebarThreadTooltip({
@@ -966,7 +987,10 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  // "grouped" is the slim layout for project-grouped active rows: the
+  // project favicon (redundant under a project header) yields its slot to
+  // the provider icon.
+  variant: "card" | "slim" | "grouped" | "group-settled";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1190,6 +1214,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     currentGitBranch: visibleGitStatus?.refName ?? null,
   });
   const prStatus = prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider);
+  const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state, pr.isDraft) : undefined;
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
@@ -1467,7 +1492,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        variant === "card"
+        // Grouped rows are active threads in slim clothing: they keep the
+        // card's title emphasis (unread/woke pop, recede only when quiet)
+        // instead of the settled tail's uniformly receded palette.
+        variant !== "slim"
           ? cn(
               "truncate",
               shouldRecede
@@ -1497,24 +1525,28 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   // Stacks show their layer count; multiple unrelated links show their total count.
   // Plain clicks open T3; individual PR links also support opening the host in a new tab.
-  const prBadgeShape = supportsMultiplePullRequests
-    ? resolveThreadPullRequestBadge(thread.pullRequests)
-    : null;
-  const handlePrStackClick = useCallback(() => {
-    useRightPanelStore.getState().open(threadRef, "pull-requests");
-    if (!props.isActive) onThreadActivate(threadRef);
-  }, [onThreadActivate, props.isActive, threadRef]);
   const prBadge =
-    prBadgeShape?.kind === "stack" || pr || currentLinkedPr ? (
-      <ThreadPullRequestBadgeControl
-        variant="underline"
-        badge={prBadgeShape}
-        number={pr?.number ?? currentLinkedPr?.number}
-        url={pr?.url ?? currentLinkedPr?.url}
-        status={prStatus}
-        onOpenStack={handlePrStackClick}
-        onOpenPullRequest={handlePrClick}
-      />
+    prStatus && pr ? (
+      <a
+        href={pr.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={handlePrClick}
+        className={cn(
+          // Sidebar chrome follows the interface font; tabular digits keep the
+          // number from reflowing as PR states stream in.
+          "shrink-0 text-xs tabular-nums hover:underline",
+          (variant === "slim" || variant === "group-settled") && variantAction === "unsettle"
+            ? props.isActive
+              ? "text-secondary-label"
+              : cn("text-secondary-label transition-colors", settledPrHoverClass)
+            : prStatus.colorClass,
+        )}
+        aria-label={prStatus.tooltip}
+      >
+        #{pr.number}
+      </a>
     ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span
@@ -1573,7 +1605,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
-  if (variant === "slim") {
+  if (variant === "slim" || variant === "grouped" || variant === "group-settled") {
     return (
       <li
         data-thread-item
@@ -1593,6 +1625,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 role="button"
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
+                data-variant={variant}
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
@@ -1611,7 +1644,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   "opacity-40 grayscale group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
               )}
             >
-              {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
+              {(variant === "grouped" || variant === "group-settled") && driverKind ? (
+                <ProviderInstanceIcon
+                  driverKind={driverKind}
+                  displayName={thread.session?.providerName ?? modelInstanceId}
+                  iconClassName="size-4"
+                />
+              ) : props.project ? (
+                <ProjectFavicon project={props.project} className="size-4" />
+              ) : null}
             </span>
             {draftIndicator}
             {title}
@@ -2132,6 +2173,9 @@ export default function Sidebar() {
   const threads = useThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
+  const groupThreadsByProject = useSidebarGroupThreadsByProject();
+  const showInactiveProjects = useSidebarShowInactiveProjects();
+  const multiProjectScope = useSidebarMultiProjectScope();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -2427,6 +2471,41 @@ export default function Sidebar() {
       setProjectScopeKey(null);
     }
   }, [allProjectSnapshotsReady, projectScopeKey, scopedProjectGroup, setProjectScopeKey]);
+  // Multi-project scope: UI-only set, not persisted in contracts.
+  const [multiScopeKeys, setMultiScopeKeys] = useState<Set<string>>(new Set());
+  const multiSelectClickedRef = useRef(false);
+  const toggleMultiScopeKey = useCallback((projectKey: string) => {
+    setMultiScopeKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectKey)) {
+        next.delete(projectKey);
+      } else {
+        next.add(projectKey);
+      }
+      return next;
+    });
+  }, []);
+  const clearMultiScope = useCallback(() => setMultiScopeKeys(new Set()), []);
+  const selectAllProjects = useCallback(() => {
+    setMultiScopeKeys(new Set(projectGroups.map((p) => p.projectKey)));
+  }, [projectGroups]);
+  // When multi-scope is active, derive scopedProjectKeys from the set of
+  // selected project keys. Empty set = all projects (null).
+  const scopedKeys: ReadonlySet<string> | null = useMemo(() => {
+    if (!multiProjectScope || multiScopeKeys.size === 0) return scopedProjectKeys;
+    const keys = new Set<string>();
+    for (const project of projectGroups) {
+      if (multiScopeKeys.has(project.projectKey)) {
+        for (const ref of project.memberProjectRefs) {
+          keys.add(`${ref.environmentId}:${ref.projectId}`);
+        }
+      }
+    }
+    return keys;
+  }, [multiProjectScope, multiScopeKeys, projectGroups, scopedProjectKeys]);
+  // Grouped mode only applies to the unscoped list: scoped to one project,
+  // a per-project header over every row would restate the scope picker.
+  const groupedModeActive = groupThreadsByProject && scopedProjectGroup === null;
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2443,10 +2522,7 @@ export default function Sidebar() {
       if (!composerDraftHasUserContent(store.draftsByThreadKey[draftKey])) {
         continue;
       }
-      if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
-      ) {
+      if (scopedKeys !== null && !scopedKeys.has(`${session.environmentId}:${session.projectId}`)) {
         continue;
       }
       count += 1;
@@ -2526,8 +2602,7 @@ export default function Sidebar() {
     const visible = threads.filter(
       (thread) =>
         thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+        (scopedKeys === null || scopedKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2613,7 +2688,7 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [nowMinute, optimisticDrop, scopedKeys, serverConfigs, snoozeWakeTick, threads]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -2703,6 +2778,9 @@ export default function Sidebar() {
     [setSettledShelfExpanded],
   );
   const renderedSettledThreads = useMemo(() => {
+    // When grouped mode is active, settled threads live inside their
+    // project sections — no global shelf needed.
+    if (groupedModeActive) return [];
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
     const routeThread = visibleSettledThreads.find(
@@ -2738,9 +2816,140 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // Grouped mode reshapes only the active partition: sections in project
+  // order (already activity-sorted), threads by last activity within each.
+  // Expansion prefs live in uiStateStore under the same alias keys the
+  // legacy sidebar writes, so a project's expand/collapse intent carries
+  // across sidebar modes. Per-section visibleThreads is the single source
+  // of truth for both the DOM and orderedThreads below — a collapsed
+  // group's threads leave jump hints and multi-select exactly like a
+  // collapsed shelf's, except the routed thread, which never hides.
+  const projectExpandedById = useUiStateStore((state) => state.projectExpandedById);
+  const setProjectExpanded = useUiStateStore((state) => state.setProjectExpanded);
+  const groupedActiveSections = useMemo(() => {
+    if (!groupedModeActive) return null;
+    const { sections, ungrouped } = groupActiveThreadsByProject(projectGroups, activeThreads);
+    return {
+      sections: sections.map((section) => {
+        const expanded = resolveProjectExpanded(
+          projectExpandedById,
+          projectExpansionPreferenceKeys(section.project),
+        );
+        const visibleThreads = expanded
+          ? section.threads
+          : section.threads.filter(
+              (thread) =>
+                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+            );
+        return { ...section, expanded, visibleThreads };
+      }),
+      ungrouped,
+    };
+  }, [activeThreads, groupedModeActive, projectExpandedById, projectGroups, routeThreadKey]);
+  const settleInProjects = groupedModeActive;
+  const groupedSettledSections = useMemo(() => {
+    if (!settleInProjects) return null;
+    const { sections, ungrouped } = groupSettledThreadsByProject(projectGroups, settledThreads);
+    return { sections, ungrouped };
+  }, [projectGroups, settleInProjects, settledThreads]);
+  const [perProjectSettledVisible, setPerProjectSettledVisible] = useState<Map<string, number>>(
+    new Map(),
+  );
+  const [perProjectSettledExpanded, setPerProjectSettledExpanded] = useState<Map<string, boolean>>(
+    new Map(),
+  );
+  const togglePerProjectSettled = useCallback((projectKey: string) => {
+    setPerProjectSettledExpanded((prev) => {
+      const next = new Map(prev);
+      const current = next.get(projectKey) ?? false;
+      next.set(projectKey, !current);
+      return next;
+    });
+  }, []);
+  const showMoreSettledForProject = useCallback((projectKey: string) => {
+    setPerProjectSettledVisible((prev) => {
+      const next = new Map(prev);
+      const current = next.get(projectKey) ?? SETTLED_TAIL_INITIAL_COUNT;
+      next.set(projectKey, current + SETTLED_TAIL_PAGE_COUNT);
+      return next;
+    });
+  }, []);
+  // Inactive projects use the FULL thread set (ignoring multi-scope filter)
+  // so that deselecting a project in the picker doesn't move it to Inactive.
+  const fullGroupedActive = useMemo(() => {
+    if (!groupedModeActive) return null;
+    return groupActiveThreadsByProject(projectGroups, activeThreads);
+  }, [groupedModeActive, projectGroups, activeThreads]);
+  const fullGroupedSettled = useMemo(() => {
+    if (!groupedModeActive) return null;
+    return groupSettledThreadsByProject(projectGroups, settledThreads);
+  }, [groupedModeActive, projectGroups, settledThreads]);
+  const inactiveProjects = useMemo(() => {
+    if (!groupedModeActive || !showInactiveProjects) return null;
+    const activeProjectKeys = new Set(
+      fullGroupedActive?.sections.map((s) => s.project.projectKey) ?? [],
+    );
+    return projectGroups
+      .filter((project) => !activeProjectKeys.has(project.projectKey))
+      .map((project) => {
+        const settledSection = fullGroupedSettled?.sections.find(
+          (s) => s.project.projectKey === project.projectKey,
+        );
+        const settledThreads = settledSection?.threads ?? [];
+        const settledCount = settledThreads.length;
+        return { project, settledCount, settledThreads };
+      });
+  }, [
+    fullGroupedActive,
+    fullGroupedSettled,
+    groupedModeActive,
+    projectGroups,
+    showInactiveProjects,
+  ]);
+  const [inactiveProjectsExpanded, setInactiveProjectsExpanded] = useLocalStorage(
+    "t3code:sidebar:inactive-projects-expanded",
+    false,
+    Schema.Boolean,
+  );
+  const [inactiveProjectExpanded, setInactiveProjectExpanded] = useState<Map<string, boolean>>(
+    new Map(),
+  );
+  const toggleInactiveProject = useCallback((projectKey: string) => {
+    setInactiveProjectExpanded((prev) => {
+      const next = new Map(prev);
+      next.set(projectKey, !(prev.get(projectKey) ?? false));
+      return next;
+    });
+  }, []);
+  const toggleInactiveProjects = useCallback(
+    () => setInactiveProjectsExpanded((v) => !v),
+    [setInactiveProjectsExpanded],
+  );
+  const toggleProjectGroupExpanded = useCallback(
+    (project: SidebarProjectSnapshot, expanded: boolean) => {
+      setProjectExpanded(projectExpansionPreferenceKeys(project), !expanded);
+    },
+    [setProjectExpanded],
+  );
+  const visibleActiveThreads = useMemo(
+    () =>
+      groupedActiveSections === null
+        ? activeThreads
+        : [
+            ...groupedActiveSections.sections.flatMap((section) => section.visibleThreads),
+            ...groupedActiveSections.ungrouped,
+          ],
+    [activeThreads, groupedActiveSections],
+  );
+
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...pinnedThreads,
+      ...visibleActiveThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [pinnedThreads, visibleActiveThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3343,20 +3552,23 @@ export default function Sidebar() {
     const pinnedRows = rowsOf(pinnedThreads, "pinned");
     items.push(...pinnedRows);
     items.push({ kind: "marker", marker: "pinned-divider" });
-    const activeRows = rowsOf(activeThreads, "active");
-    items.push({ kind: "marker", marker: "active-placeholder" });
-    items.push(...activeRows);
-    if (snoozedThreads.length > 0) {
-      items.push({ kind: "marker", marker: "snoozed-header" });
-      items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
+    if (!groupedModeActive) {
+      const activeRows = rowsOf(activeThreads, "active");
+      items.push({ kind: "marker", marker: "active-placeholder" });
+      items.push(...activeRows);
+      if (snoozedThreads.length > 0) {
+        items.push({ kind: "marker", marker: "snoozed-header" });
+        items.push(...rowsOf(visibleSnoozedThreads, "snoozed"));
+      }
+      items.push({ kind: "marker", marker: "settled-header" });
+      const settledRows = rowsOf(renderedSettledThreads, "settled");
+      items.push({ kind: "marker", marker: "settled-placeholder" });
+      items.push(...settledRows);
     }
-    items.push({ kind: "marker", marker: "settled-header" });
-    const settledRows = rowsOf(renderedSettledThreads, "settled");
-    items.push({ kind: "marker", marker: "settled-placeholder" });
-    items.push(...settledRows);
     return items;
   }, [
     activeThreads,
+    groupedModeActive,
     pinnedThreads,
     renderedSettledThreads,
     settledThreads.length,
@@ -4386,20 +4598,28 @@ export default function Sidebar() {
                   open={projectScopeMenuState.open}
                   onOpenChange={(open) => {
                     if (open) suppressNextScopeChangeRef.current = false;
+                    if (multiProjectScope && !open && multiSelectClickedRef.current) {
+                      multiSelectClickedRef.current = false;
+                      return;
+                    }
                     dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
                   onItemHighlighted={(item) => {
                     highlightedProjectScopeKeyRef.current = item?.value ?? null;
                   }}
                   value={selectedProjectScopeItem}
-                  onValueChange={(item) => {
-                    if (suppressNextScopeChangeRef.current) {
-                      suppressNextScopeChangeRef.current = false;
-                      return;
-                    }
-                    if (!item) return;
-                    setProjectScopeKey(item.value === "all" ? null : item.value);
-                  }}
+                  onValueChange={
+                    multiProjectScope
+                      ? undefined
+                      : (item) => {
+                          if (suppressNextScopeChangeRef.current) {
+                            suppressNextScopeChangeRef.current = false;
+                            return;
+                          }
+                          if (!item) return;
+                          setProjectScopeKey(item.value === "all" ? null : item.value);
+                        }
+                  }
                 >
                   <ComboboxTrigger
                     render={
@@ -4412,7 +4632,9 @@ export default function Sidebar() {
                       />
                     }
                   >
-                    {scopedProjectGroup ? (
+                    {multiProjectScope && multiScopeKeys.size > 0 ? (
+                      <FolderIcon className="size-4 shrink-0" />
+                    ) : scopedProjectGroup ? (
                       // Wrapped so the button's direct-child svg color rule cannot override
                       // a project's own icon color.
                       <span className="flex shrink-0">
@@ -4421,6 +4643,12 @@ export default function Sidebar() {
                     ) : (
                       <FolderIcon className="size-4" />
                     )}
+                    <span className="min-w-0 flex-1 truncate">
+                      {multiProjectScope && multiScopeKeys.size > 0
+                        ? `${multiScopeKeys.size} project${multiScopeKeys.size === 1 ? "" : "s"}`
+                        : (scopedProjectGroup?.displayName ?? "All projects")}
+                    </span>
+                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
                   </ComboboxTrigger>
                   <ComboboxPopup
                     align="start"
@@ -4459,10 +4687,32 @@ export default function Sidebar() {
                         })
                       }
                     />
+                    {multiProjectScope ? (
+                      <div className="shrink-0 border-b border-border/70 px-3 py-1.5">
+                        <button
+                          type="button"
+                          className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 text-xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            if (multiScopeKeys.size === projectGroups.length) {
+                              clearMultiScope();
+                            } else {
+                              selectAllProjects();
+                            }
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {multiScopeKeys.size === projectGroups.length
+                            ? "Deselect all"
+                            : "Select all"}
+                        </button>
+                      </div>
+                    ) : null}
                     <ComboboxEmpty>No matching projects.</ComboboxEmpty>
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
+                        const isMultiSelected = multiProjectScope && multiScopeKeys.has(item.value);
                         return (
                           <ComboboxItem
                             key={item.value}
@@ -4473,6 +4723,16 @@ export default function Sidebar() {
                             onContextMenu={(event) => {
                               if (project) handleProjectSettings(event, project);
                             }}
+                            onPointerDown={
+                              multiProjectScope && item.value !== "all"
+                                ? (event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    multiSelectClickedRef.current = true;
+                                    toggleMultiScopeKey(item.value);
+                                  }
+                                : undefined
+                            }
                           >
                             {project ? (
                               <ProjectFavicon project={project} className="size-4 shrink-0" />
@@ -4487,7 +4747,22 @@ export default function Sidebar() {
                                 machineByEnvironmentId={environmentMachineById}
                               />
                             ) : null}
-                            {project ? (
+                            {multiProjectScope && item.value === "all" ? (
+                              <button
+                                type="button"
+                                className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
+                                onPointerDown={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  clearMultiScope();
+                                }}
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Clear all
+                              </button>
+                            ) : multiProjectScope && isMultiSelected ? (
+                              <CheckIcon className="ml-auto size-3.5 shrink-0" />
+                            ) : project ? (
                               <Button
                                 size="icon-xs"
                                 variant="ghost-muted"
@@ -4632,20 +4907,32 @@ export default function Sidebar() {
                         // row: every other thread is a full card. Density comes
                         // from users (or the auto rules) actually parking work,
                         // not from the sidebar second-guessing what still matters.
-                        const isCard = section === "active" || section === "pinned";
-                        const rowVariant = isCard ? "card" : "slim";
+                        // Exception: grouped mode, where the user opted the whole
+                        // active partition into compact per-project rows.
+                        const isCard =
+                          section === "pinned" ||
+                          (section === "active" && groupedActiveSections === null);
+                        const rowVariant = isCard
+                          ? "card"
+                          : section === "active"
+                            ? "grouped"
+                            : section === "group-settled"
+                              ? "group-settled"
+                              : "slim";
+                        const keyVariant =
+                          section === "group-settled" ? "group-settled" : rowVariant;
                         return (
                           <SidebarThreadRow
                             // Fade between card and compact rows while the outer
                             // sortable wrapper keeps its identity during a drag.
-                            key={`${threadKey}:${rowVariant}`}
+                            key={`${threadKey}:${keyVariant}`}
                             thread={thread}
                             variant={rowVariant}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
                               section === "snoozed"
                                 ? "unsnooze"
-                                : section === "settled"
+                                : section === "settled" || section === "group-settled"
                                   ? "unsettle"
                                   : "settle"
                             }
@@ -4753,7 +5040,7 @@ export default function Sidebar() {
                           key="draft-sessions"
                           projectByKey={projectByKey}
                           projectDisplayNameByKey={projectDisplayNameByKey}
-                          scopedProjectKeys={scopedProjectKeys}
+                          scopedProjectKeys={scopedKeys}
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
                         />,
@@ -4862,9 +5149,463 @@ export default function Sidebar() {
                             break;
                         }
                       }
+                      if (groupedActiveSections !== null) {
+                        // Grouped mode: a collapsible header per project (same
+                        // anatomy as the shelf headers below), compact rows under
+                        // it. Sections and rows share the shelves' conditional-
+                        // render collapse — no animated-height panel, which would
+                        // fight content-visibility and the list's auto-animate.
+                        for (const section of groupedActiveSections.sections) {
+                          items.push(
+                            <li
+                              key={`project-group-header:${section.project.projectKey}`}
+                              data-thread-selection-safe
+                              className="list-none"
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  toggleProjectGroupExpanded(section.project, section.expanded)
+                                }
+                                onContextMenu={
+                                  isElectron
+                                    ? (event) => {
+                                        event.preventDefault();
+                                        void (async () => {
+                                          const api = readLocalApi();
+                                          if (!api) return;
+                                          const clicked = await settlePromise(() =>
+                                            api.contextMenu.show(
+                                              [
+                                                {
+                                                  id: "project-settings",
+                                                  label: "Project settings",
+                                                },
+                                                {
+                                                  id: "new-thread",
+                                                  label: `New thread in ${section.project.displayName}`,
+                                                },
+                                              ],
+                                              { x: event.clientX, y: event.clientY },
+                                            ),
+                                          );
+                                          if (clicked._tag === "Failure") return;
+                                          if (clicked.value === "project-settings") {
+                                            openProjectSettings(section.project);
+                                          } else if (clicked.value === "new-thread") {
+                                            const projectRef = section.project.memberProjectRefs[0];
+                                            if (projectRef) {
+                                              void handleNewThreadRef.current(projectRef);
+                                            }
+                                          }
+                                        })();
+                                      }
+                                    : undefined
+                                }
+                                aria-expanded={section.expanded}
+                                data-testid="sidebar-project-group-toggle"
+                                className="mb-1 mt-2 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                              >
+                                <ProjectFavicon
+                                  project={section.project}
+                                  className="size-4 shrink-0"
+                                />
+                                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                                  {section.expanded
+                                    ? section.project.displayName
+                                    : `${section.project.displayName} (${section.threads.length})`}
+                                </span>
+                                <span className="h-px flex-1 bg-sidebar-border/60" />
+                                <ChevronDownIcon
+                                  aria-hidden
+                                  className={cn(
+                                    "size-3 shrink-0 text-muted-foreground/50 transition-transform",
+                                    section.expanded && "rotate-180",
+                                  )}
+                                />
+                              </button>
+                            </li>,
+                          );
+                          if (section.expanded && section.visibleThreads.length > 0) {
+                            items.push(
+                              <li
+                                key={`project-group-tree:${section.project.projectKey}`}
+                                className={cn(
+                                  "list-none",
+                                  isElectron &&
+                                    "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5 pt-px",
+                                )}
+                              >
+                                <ul role="list" className="flex flex-col gap-px">
+                                  {section.visibleThreads.map((thread) =>
+                                    renderThreadRow(thread, "active"),
+                                  )}
+                                </ul>
+                              </li>,
+                            );
+                          }
+                          if (
+                            settleInProjects &&
+                            groupedSettledSections !== null &&
+                            section.expanded
+                          ) {
+                            const settledSection = groupedSettledSections.sections.find(
+                              (s) => s.project.projectKey === section.project.projectKey,
+                            );
+                            if (settledSection && settledSection.threads.length > 0) {
+                              const projectKey = section.project.projectKey;
+                              const isExpanded = perProjectSettledExpanded.get(projectKey) ?? false;
+                              const visibleCount =
+                                perProjectSettledVisible.get(projectKey) ??
+                                SETTLED_TAIL_INITIAL_COUNT;
+                              const visibleThreads = settledSection.threads.slice(0, visibleCount);
+                              const hiddenCount =
+                                settledSection.threads.length - visibleThreads.length;
+                              items.push(
+                                <li
+                                  key={`project-group-settled-header:${projectKey}`}
+                                  className={cn(
+                                    "list-none",
+                                    isElectron &&
+                                      "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => togglePerProjectSettled(projectKey)}
+                                    className="mb-1 mt-1 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                                  >
+                                    <span className="text-[10px] font-medium text-muted-foreground/40">
+                                      Settled ({settledSection.threads.length})
+                                    </span>
+                                    <span className="h-px flex-1 bg-sidebar-border/40" />
+                                    <ChevronDownIcon
+                                      aria-hidden
+                                      className={cn(
+                                        "size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                                        isExpanded && "rotate-180",
+                                      )}
+                                    />
+                                  </button>
+                                </li>,
+                              );
+                              if (isExpanded) {
+                                items.push(
+                                  <li
+                                    key={`project-group-settled-tree:${projectKey}`}
+                                    className={cn(
+                                      "list-none",
+                                      isElectron &&
+                                        "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                                    )}
+                                  >
+                                    <ul role="list" className="flex flex-col gap-px">
+                                      {visibleThreads.map((thread) =>
+                                        renderThreadRow(thread, "group-settled"),
+                                      )}
+                                    </ul>
+                                  </li>,
+                                );
+                                if (hiddenCount > 0) {
+                                  items.push(
+                                    <li
+                                      key={`project-group-settled-more:${projectKey}`}
+                                      className="list-none"
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => showMoreSettledForProject(projectKey)}
+                                        className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                                      >
+                                        <PlusIcon aria-hidden className="size-4 shrink-0" />
+                                        Show {Math.min(hiddenCount, SETTLED_TAIL_PAGE_COUNT)} more
+                                      </button>
+                                    </li>,
+                                  );
+                                }
+                              }
+                            }
+                          }
+                        }
+                        // Threads whose project matches no group (stale refs
+                        // mid-sync): rendered headerless at the tail rather than
+                        // silently dropped.
+                        for (const thread of groupedActiveSections.ungrouped) {
+                          items.push(renderThreadRow(thread, "active"));
+                        }
+                      }
+                      // Snoozed shelf: between the inbox and Settled — out of the
+                      // way, never gone. The header always renders while anything
+                      // is snoozed (the count is the whole footprint when
+                      // collapsed); rows only when expanded. Vanishes entirely at
+                      // count 0.
+                      if (snoozedThreads.length > 0) {
+                        items.push(
+                          <li
+                            key="snoozed-shelf-header"
+                            data-thread-selection-safe
+                            className="list-none"
+                          >
+                            <button
+                              type="button"
+                              onClick={toggleSnoozedShelf}
+                              aria-expanded={snoozedShelfExpanded}
+                              data-testid="sidebar-snoozed-shelf-toggle"
+                              className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                            >
+                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                                {snoozedShelfExpanded
+                                  ? "Snoozed"
+                                  : `Snoozed (${snoozedThreads.length})`}
+                              </span>
+                              <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
+                              <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                  "size-3 text-blue-600 transition-transform dark:text-blue-400",
+                                  snoozedShelfExpanded && "rotate-180",
+                                )}
+                              />
+                            </button>
+                          </li>,
+                        );
+                        for (const thread of visibleSnoozedThreads) {
+                          items.push(renderThreadRow(thread, "snoozed"));
+                        }
+                      }
+                      if (!groupedModeActive && settledThreads.length > 0) {
+                        items.push(
+                          <li
+                            key="settled-shelf-header"
+                            data-thread-selection-safe
+                            className="list-none"
+                          >
+                            <button
+                              type="button"
+                              onClick={toggleSettledShelf}
+                              aria-expanded={settledShelfExpanded}
+                              data-testid="sidebar-settled-shelf-toggle"
+                              className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                            >
+                              <span className="text-xs font-medium text-muted-foreground/50">
+                                {settledShelfExpanded
+                                  ? "Settled"
+                                  : `Settled (${settledThreads.length})`}
+                              </span>
+                              <span className="h-px flex-1 bg-sidebar-border/60" />
+                              <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                  "size-3 text-muted-foreground/50 transition-transform",
+                                  settledShelfExpanded && "rotate-180",
+                                )}
+                              />
+                            </button>
+                          </li>,
+                        );
+                      }
+                      if (!groupedModeActive) {
+                        for (const thread of renderedSettledThreads) {
+                          items.push(renderThreadRow(thread, "settled"));
+                        }
+                      }
+                      if (inactiveProjects !== null && inactiveProjects.length > 0) {
+                        items.push(
+                          <li
+                            key="inactive-projects-header"
+                            data-thread-selection-safe
+                            className="list-none"
+                          >
+                            <button
+                              type="button"
+                              onClick={toggleInactiveProjects}
+                              aria-expanded={inactiveProjectsExpanded}
+                              data-testid="sidebar-inactive-projects-toggle"
+                              className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                            >
+                              <span className="text-xs font-medium text-muted-foreground/50">
+                                {inactiveProjectsExpanded
+                                  ? "Inactive projects"
+                                  : `Inactive projects (${inactiveProjects.length})`}
+                              </span>
+                              <span className="h-px flex-1 bg-sidebar-border/60" />
+                              <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                  "size-3 text-muted-foreground/50 transition-transform",
+                                  inactiveProjectsExpanded && "rotate-180",
+                                )}
+                              />
+                            </button>
+                          </li>,
+                        );
+                        if (inactiveProjectsExpanded) {
+                          for (const entry of inactiveProjects) {
+                            // Exclude projects filtered out by the multi-scope selector.
+                            if (
+                              scopedKeys !== null &&
+                              !entry.project.memberProjectRefs.some((ref) =>
+                                scopedKeys.has(`${ref.environmentId}:${ref.projectId}`),
+                              )
+                            )
+                              continue;
+                            const projectKey = entry.project.projectKey;
+                            const isExpanded = inactiveProjectExpanded.get(projectKey) ?? false;
+                            const hasSettled = entry.settledCount > 0;
+                            if (hasSettled) {
+                              items.push(
+                                <li
+                                  key={`inactive-project-header:${projectKey}`}
+                                  className="list-none"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleInactiveProject(projectKey)}
+                                    onContextMenu={
+                                      isElectron
+                                        ? (event) => {
+                                            event.preventDefault();
+                                            void (async () => {
+                                              const api = readLocalApi();
+                                              if (!api) return;
+                                              const clicked = await settlePromise(() =>
+                                                api.contextMenu.show(
+                                                  [
+                                                    {
+                                                      id: "project-settings",
+                                                      label: "Project settings",
+                                                    },
+                                                    {
+                                                      id: "new-thread",
+                                                      label: `New thread in ${entry.project.displayName}`,
+                                                    },
+                                                  ],
+                                                  { x: event.clientX, y: event.clientY },
+                                                ),
+                                              );
+                                              if (clicked._tag === "Failure") return;
+                                              if (clicked.value === "project-settings") {
+                                                openProjectSettings(entry.project);
+                                              } else if (clicked.value === "new-thread") {
+                                                const projectRef =
+                                                  entry.project.memberProjectRefs[0];
+                                                if (projectRef) {
+                                                  void handleNewThreadRef.current(projectRef);
+                                                }
+                                              }
+                                            })();
+                                          }
+                                        : undefined
+                                    }
+                                    className="flex h-9 w-full cursor-pointer items-center gap-2.5 px-2.5 text-left"
+                                  >
+                                    <ProjectFavicon
+                                      project={entry.project}
+                                      className="size-4 shrink-0 opacity-40"
+                                    />
+                                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
+                                      {entry.project.displayName} ({entry.settledCount} settled)
+                                    </span>
+                                    <ChevronDownIcon
+                                      aria-hidden
+                                      className={cn(
+                                        "size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                                        isExpanded && "rotate-180",
+                                      )}
+                                    />
+                                  </button>
+                                </li>,
+                              );
+                              if (isExpanded) {
+                                items.push(
+                                  <li
+                                    key={`inactive-project-settled-tree:${projectKey}`}
+                                    className={cn(
+                                      "list-none",
+                                      isElectron &&
+                                        "ml-2.5 border-l-2 border-sidebar-border/40 pl-1.5",
+                                    )}
+                                  >
+                                    <ul role="list" className="flex flex-col gap-px">
+                                      {entry.settledThreads.map((thread) =>
+                                        renderThreadRow(thread, "group-settled"),
+                                      )}
+                                    </ul>
+                                  </li>,
+                                );
+                              }
+                            } else {
+                              items.push(
+                                <li
+                                  key={`inactive-project:${projectKey}`}
+                                  className="list-none flex h-9 items-center gap-2.5 px-2.5"
+                                  onContextMenu={
+                                    isElectron
+                                      ? (event) => {
+                                          event.preventDefault();
+                                          void (async () => {
+                                            const api = readLocalApi();
+                                            if (!api) return;
+                                            const clicked = await settlePromise(() =>
+                                              api.contextMenu.show(
+                                                [
+                                                  {
+                                                    id: "project-settings",
+                                                    label: "Project settings",
+                                                  },
+                                                  {
+                                                    id: "new-thread",
+                                                    label: `New thread in ${entry.project.displayName}`,
+                                                  },
+                                                ],
+                                                { x: event.clientX, y: event.clientY },
+                                              ),
+                                            );
+                                            if (clicked._tag === "Failure") return;
+                                            if (clicked.value === "project-settings") {
+                                              openProjectSettings(entry.project);
+                                            } else if (clicked.value === "new-thread") {
+                                              const projectRef = entry.project.memberProjectRefs[0];
+                                              if (projectRef) {
+                                                void handleNewThreadRef.current(projectRef);
+                                              }
+                                            }
+                                          })();
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <ProjectFavicon
+                                    project={entry.project}
+                                    className="size-4 shrink-0 opacity-40"
+                                  />
+                                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/50">
+                                    {entry.project.displayName} (empty)
+                                  </span>
+                                  <Button
+                                    size="icon-micro"
+                                    variant="ghost"
+                                    aria-label={`New thread in ${entry.project.displayName}`}
+                                    title={`New thread in ${entry.project.displayName}`}
+                                    className="ml-auto shrink-0 size-6 text-muted-foreground/40 hover:text-foreground cursor-pointer"
+                                    onClick={() => {
+                                      const projectRef = entry.project.memberProjectRefs[0];
+                                      if (projectRef) {
+                                        void handleNewThreadRef.current(projectRef);
+                                      }
+                                    }}
+                                  >
+                                    <SquarePenIcon className="size-3" />
+                                  </Button>
+                                </li>,
+                              );
+                            }
+                          }
+                        }
+                      }
                       return items;
                     })()}
-                    {settledShelfExpanded && hiddenSettledCount > 0 ? (
+                    {!groupedModeActive && settledShelfExpanded && hiddenSettledCount > 0 ? (
                       <li className="list-none">
                         <button
                           type="button"

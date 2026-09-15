@@ -213,6 +213,23 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
+    id: "group-threads-by-project",
+    title: "Group threads by project",
+    to: "/settings/general",
+  },
+  {
+    id: "multi-project-scope",
+    title: "Multi-project scope",
+    to: "/settings/general",
+    searchTerms: ["select multiple projects filter picker"],
+  },
+  {
+    id: "show-inactive-projects",
+    title: "Show inactive projects",
+    to: "/settings/general",
+    searchTerms: ["projects no active threads empty settled only"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",
