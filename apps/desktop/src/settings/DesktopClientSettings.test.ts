@@ -57,6 +57,9 @@ const clientSettings: ClientSettings = {
   proactivePanelsEnabled: true,
   showSkillsInSlashMenu: false,
   providerModelPreferences: {},
+  sidebarAutoSettleAfterDays: 3,
+  sidebarAutoSettleOnMerge: true,
+  sidebarGroupThreadsByProject: false,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",

@@ -2202,6 +2202,52 @@ export function GeneralSettingsPanel() {
           }
         />
 
+        <SettingsRow
+          {...searchableSetting("group-threads-by-project")}
+          description="Group active sidebar threads under collapsible project headers, ordered by last activity."
+          control={
+            <Switch
+              checked={settings.sidebarGroupThreadsByProject}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarGroupThreadsByProject: Boolean(checked) })
+              }
+              aria-label="Group threads by project"
+            />
+          }
+        />
+
+        {settings.sidebarGroupThreadsByProject ? (
+          <SettingsRow
+            {...searchableSetting("multi-project-scope")}
+            description="Select multiple projects in the sidebar scope picker to see only their threads."
+            control={
+              <Switch
+                checked={settings.sidebarMultiProjectScope}
+                onCheckedChange={(checked) =>
+                  updateSettings({ sidebarMultiProjectScope: Boolean(checked) })
+                }
+                aria-label="Multi-project scope"
+              />
+            }
+          />
+        ) : null}
+
+        {settings.sidebarGroupThreadsByProject ? (
+          <SettingsRow
+            {...searchableSetting("show-inactive-projects")}
+            description="Show projects with no active threads in a collapsible section at the bottom of the sidebar."
+            control={
+              <Switch
+                checked={settings.sidebarShowInactiveProjects}
+                onCheckedChange={(checked) =>
+                  updateSettings({ sidebarShowInactiveProjects: Boolean(checked) })
+                }
+                aria-label="Show inactive projects"
+              />
+            }
+          />
+        ) : null}
+
         {supportsAutoSettlement ? (
           <>
             <SettingsRow
