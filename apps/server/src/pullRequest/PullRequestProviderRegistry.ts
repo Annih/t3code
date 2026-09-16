@@ -8,6 +8,7 @@ import * as BitbucketApi from "../sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as GitHubGraphQlBudget from "../sourceControl/githubGraphQlBudget.ts";
 import * as GitLabCli from "../sourceControl/GitLabCli.ts";
+import * as ServerSettingsService from "../serverSettings.ts";
 import * as ForgejoCli from "../sourceControl/ForgejoCli.ts";
 import * as ForgejoPullRequestProvider from "./ForgejoPullRequestProvider.ts";
 import * as AzureDevOpsPullRequestCli from "./AzureDevOpsPullRequestCli.ts";
@@ -43,19 +44,34 @@ export function fromProviders(
 /**
  * The hosts this build can read change requests from. A host with no entry here still shows up
  * in the provider list as unimplemented, so its projects are explained rather than missing.
+ * Providers disabled in sourceControlProviders settings are excluded.
  *
  * @public Service construction is part of the canonical Effect module API.
  */
-export const make = Effect.map(
-  Effect.all([
-    GitHubPullRequestProvider.make,
-    GitLabPullRequestProvider.make,
-    ForgejoPullRequestProvider.make,
-    BitbucketPullRequestProvider.make,
-    AzureDevOpsPullRequestProvider.make,
-  ]),
-  fromProviders,
-);
+export const make = Effect.gen(function* () {
+  const serverSettingsSvc = yield* ServerSettingsService.ServerSettingsService;
+  const settings = yield* serverSettingsSvc.getSettings;
+
+  const providers: Array<PullRequestProviderApi> = yield* Effect.all([
+    settings.sourceControlProviders["github"]?.enabled !== false
+      ? GitHubPullRequestProvider.make
+      : Effect.succeed(null),
+    settings.sourceControlProviders["gitlab"]?.enabled !== false
+      ? GitLabPullRequestProvider.make
+      : Effect.succeed(null),
+    settings.sourceControlProviders["forgejo"]?.enabled !== false
+      ? ForgejoPullRequestProvider.make
+      : Effect.succeed(null),
+    settings.sourceControlProviders["bitbucket"]?.enabled !== false
+      ? BitbucketPullRequestProvider.make
+      : Effect.succeed(null),
+    settings.sourceControlProviders["azure-devops"]?.enabled !== false
+      ? AzureDevOpsPullRequestProvider.make
+      : Effect.succeed(null),
+  ]).pipe(Effect.map((all) => all.filter((p): p is PullRequestProviderApi => p !== null)));
+
+  return fromProviders(providers);
+});
 
 export const layer = Layer.effect(PullRequestProviderRegistry, make).pipe(
   Layer.provide(
